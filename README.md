@@ -1,4 +1,4 @@
-# Fennec UI
+# Fennec
 ![Demo Screenshot](demo.png)
 
 A customized Mozilla Firefox experience designed around minimalism and optimized vertical tab support. Achieved through userChrome.css modifications and cohesive extension integrations.
