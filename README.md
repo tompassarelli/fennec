@@ -54,7 +54,7 @@ Note: Please see [security considerations](#security-considerations) before inst
 Sideberry is used for tabs, toggling the extension shortcut set to sideberry toggles the whole UI.
 This also applies to: history, bookmarks, etc. shortcuts
 
-🎮 **[Discord](https://discord.gg/cPJmK7YT)** - come chill, get help with things, etc
+💬 **[Discussions](https://github.com/tompassarelli/fennec-ui/discussions)** - ask questions, share setups, and connect with other users
 
 📝 **[Release Notes](https://github.com/tompassarelli/fennec-ui/wiki/Release-Notes)** - version history and changelog
 
