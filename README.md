@@ -30,7 +30,7 @@ Note: Please see [security considerations](#security-considerations) before inst
    - "Show Sidebar" is off 
      - not supported (just use hotkeys to switch to history/bookmarks/gpt as desired)
    - Sidebar is configured to appear on left side (browser default)
-3. Add CSS files (userChrome.css to chrome folder, sideberry.css to its Styles editor)
+3. Add CSS
    - Enable firefox to be able to use userChrome.css
      - `toolkit.legacyUserProfileCustomizations.stylesheets` in `about:config`
    - Navigate to your profile directory
@@ -42,7 +42,7 @@ Note: Please see [security considerations](#security-considerations) before inst
    - Add a chrome folder and userChrome.css
       - Now create a `chrome` folder in your profile folder if it doesn't exist
       - Copy `userChrome.css` to the `chrome` folder, from this repo's chrome folder
-   - Insert sideberry.css from this repo in the sideberry custom css settings
+   - (Optional but suggested) Insert sideberry.css from this repo in the sideberry custom css settings
       - Right click on sideberry extension and open settings, or in the extension menu select the gear icon
       - Scroll down the settings section until the end, you should see "Styles Editor" tab on the left hand side, second to last option
       - There is a code area on the right hand of the screen, paste css code in there
