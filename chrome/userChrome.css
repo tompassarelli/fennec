@@ -157,11 +157,20 @@ gap: space between components, like padding/margin
 
 /* #endregion css variables and theme handling */
 
+#sidebar-box[hidden] {
+  display: flex !important;
+  width: 0px !important;
+  min-width: 0px !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+}
+
 /* #region dynamic sidebar toggle */
 
 /* toggle the entire ui by toggling the sidebar */
 body:has(#sidebar-box[hidden]:not(:hover)) #navigator-toolbox {
   width: 0px !important;
+  overflow: hidden !important;
   pointer-events: none;
 }
 
@@ -263,6 +272,7 @@ body:has(#sidebar-box[hidden]):has(#navigator-toolbox:hover) toolbaritem#urlbar-
   padding-top: var(--fen-gap-y) !important;
 /*   background-color: var(--fen-color) !important; */
   background-color: var(--fen-header-bg-color) !important;
+  transition: width 0.3s ease !important;
 }
 
 /* the thing that comes up when you hold alt, there's already settings menu */
@@ -627,8 +637,10 @@ body:has(#sidebar-box[hidden]):has(#identity-box.notSecure)::before {
 /* smallest width seems to be 224px */
 #sidebar-box {
   max-width: var(--fen-max-width) !important;
+  min-width: 0px !important;
   padding-left: var(--fen-gap-x);
   background-color: var(--fen-color) !important;
+  transition: width 0.3s ease, padding 0.3s ease !important;
 }
 
 /* Remove the "Sideberry", "History", etc. sidepanel header  */
