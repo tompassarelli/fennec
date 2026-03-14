@@ -184,6 +184,11 @@ body:has(#sidebar-box[hidden]) #identity-icon-box {
 	background-color: transparent !important;
 }
 
+body:has(#sidebar-box[hidden]) #urlbar {
+  opacity: 0 !important;
+  transition: opacity 0.1s ease !important;
+}
+
 /* #endregion dynamic sidebar toggle */
 
 /* #region hover-reveal (off by default)
@@ -411,6 +416,10 @@ panel#appMenu-popup {
   margin: 0px !important;
   margin-left: var(--fen-gap-x) !important;
   top: var(--fen-urlbar-position-y);
+}
+
+#urlbar {
+  transition: opacity 0.2s ease 0.1s !important;
 }
 /* moz setting: "Show sidebar" active */
 body:not(:has(#sidebar-main[hidden])) #urlbar-container {
