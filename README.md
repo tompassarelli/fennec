@@ -1,6 +1,8 @@
 # Fennec
 A customized Mozilla Firefox experience designed around minimalism and optimized vertical tab support. Achieved through userChrome.css modifications and cohesive extension integrations.
 
+![Sidebar toggle example](fennec-sidebar-toggle.gif)
+
 | Sidebar Open | Zen Mode |
 |:---:|:---:|
 | ![Fennec with sidebar](fennec.webp) | ![Fennec without sidebar](fennec-no-sidebar.webp) |
@@ -64,8 +66,6 @@ To enable: uncomment the `hover-reveal` region in `userChrome.css` (remove the `
 
 Sideberry is used for tabs, toggling the extension shortcut set to sideberry toggles the whole UI.
 This also applies to: history, bookmarks, etc. shortcuts
-
-![Sidebar toggle example](fennec-sidebar-toggle.gif)
 
 💬 **[Discussions](https://github.com/tompassarelli/fennec-ui/discussions)** - ask questions, share setups, and connect with other users
 
