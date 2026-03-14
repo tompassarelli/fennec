@@ -68,7 +68,7 @@ This also applies to: history, bookmarks, etc. shortcuts
 
 💬 **[Discussions](https://github.com/tompassarelli/fennec-ui/discussions)** - ask questions, share setups, and connect with other users
 
-📝 **[Release Notes](https://github.com/tompassarelli/fennec/releases)** - version history and changelog
+📝 **[Releases](https://github.com/tompassarelli/fennec/releases)** - version history and changelog
 
 🛤️ **[Roadmap](https://github.com/tompassarelli/fennec-ui/wiki/Roadmap)** - planned features and development timeline
 
