@@ -205,8 +205,6 @@ body:has(#sidebar-box[hidden]) #urlbar {
 */
 /*
 
--- nothing in the drawer is hovered — collapse condition
--- mirrors: #sidebar-box[hidden] + 10px hover target via negative margin
 body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
   #sidebar-box:not([hidden]) {
   display: flex !important;
@@ -222,7 +220,6 @@ body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(
   transition: width 0.3s ease, max-width 0.3s ease, margin-right 0.3s ease, padding 0.3s step-end, opacity 0.2s ease !important;
 }
 
--- mirrors: body:has(#sidebar-box[hidden]:not(:hover)) #navigator-toolbox
 body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
   #navigator-toolbox {
   width: 0px !important;
@@ -232,7 +229,6 @@ body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(
   transition: width 0.3s ease, opacity 0.2s ease !important;
 }
 
--- mirrors: body:has(#sidebar-box[hidden]:not(:hover)) toolbaritem#urlbar-container
 body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
   toolbaritem#urlbar-container {
   width: 0px !important;
@@ -240,20 +236,17 @@ body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(
   pointer-events: none;
 }
 
--- mirrors: body:has(#sidebar-box[hidden]) #urlbar
 body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
   #urlbar {
   opacity: 0 !important;
   transition: opacity 0.2s ease !important;
 }
 
--- mirrors: body:has(#sidebar-box[hidden]) #identity-icon-box
 body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
   #identity-icon-box {
   background-color: transparent !important;
 }
 
--- collapse: splitter
 body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
   #sidebar-splitter {
   display: none !important;
