@@ -163,6 +163,7 @@ gap: space between components, like padding/margin
   min-width: 0px !important;
   overflow: hidden !important;
   padding: 0 !important;
+  transition: width 0.3s ease, padding 0.3s step-end !important;
 }
 
 /* #region dynamic sidebar toggle */
@@ -649,7 +650,7 @@ body:has(#sidebar-box[hidden]):has(#identity-box.notSecure)::before {
   min-width: 0px !important;
   padding-left: var(--fen-gap-x);
   background-color: var(--fen-color) !important;
-  transition: width 0.3s ease, padding 0.3s ease !important;
+  transition: width 0.3s ease, padding 0.3s step-start !important;
 }
 
 /* Remove the "Sideberry", "History", etc. sidepanel header  */
