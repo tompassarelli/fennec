@@ -50,7 +50,9 @@ Install [Sideberry](https://addons.mozilla.org/en-US/firefox/addon/sidebery/) fr
 1. Inside the profile folder, create a `chrome` directory if it doesn't already exist
 2. Copy `userChrome.css` from this repo's `chrome/` folder into that `chrome` directory
 
-### 4. (Optional) Apply Sideberry Styles
+### 4. Apply Sideberry Styles
+
+> Optional, but needed to center the Sideberry drawer.
 
 1. Right-click the Sideberry icon and select **Settings** (or click the gear icon in the extension menu)
 2. In the left sidebar, scroll to the bottom and select **Styles Editor**
