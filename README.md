@@ -51,15 +51,7 @@ Install [Sideberry](https://addons.mozilla.org/en-US/firefox/addon/sidebery/) fr
 2. Copy `userChrome.css` from this repo's `chrome/` folder into that `chrome` directory
 3. Copy `autohide.css` into the same `chrome` directory (needed if you want [autohide](#autohide-off-by-default))
 
-### 4. Apply Sideberry Styles
-
-> Optional, but needed to center the Sideberry drawer.
-
-1. Right-click the Sideberry icon and select **Settings** (or click the gear icon in the extension menu)
-2. In the left sidebar, scroll to the bottom and select **Styles Editor**
-3. Paste the contents of `sideberry.css` from this repo into the editor
-
-### 5. Restart Firefox
+### 4. Restart Firefox
 
 ### Optional Recommended Extensions
 - **[Vimium](https://addons.mozilla.org/en-US/firefox/addon/vimium-ff/)** - Keyboard-driven navigation that complements the minimal, distraction-free interface
