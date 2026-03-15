@@ -54,7 +54,7 @@ irm https://raw.githubusercontent.com/tompassarelli/fennec/main/install.ps1 | ie
 1. Go to `about:config` in the address bar
 2. Set `toolkit.legacyUserProfileCustomizations.stylesheets` to `true`
 3. Set `sidebar.verticalTabs` to `false`
-4. Set `sidebar.revamp` to `false`
+4. Set `sidebar.revamp` to `false` (or turn off **Show Sidebar** in Settings)
 
 **Locate your Firefox profile directory:**
 1. Go to `about:support` in the address bar
