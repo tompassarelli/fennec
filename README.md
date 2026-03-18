@@ -32,6 +32,16 @@ Choose **one** of the two methods below:
 
 #### Option A: Automated (recommended)
 
+**macOS / Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/tompassarelli/fennec/main/install.sh | bash
+```
+
+**Windows** (PowerShell):
+```powershell
+irm https://raw.githubusercontent.com/tompassarelli/fennec/main/install.ps1 | iex
+```
+
 The script does the following:
 - Copies core files (`fennec/fennec.css`, `fennec/autohide.css`) into your Firefox profile — always updated
 - Creates `userChrome.css` (entry point) and `user/user.css` (your customizations) if they don't exist — preserved on update
@@ -48,16 +58,6 @@ The entry point wires everything together:
 Fennec updates `chrome/fennec/`. Your tweaks live in `chrome/user/`. `userChrome.css` just wires them together — advanced users can edit it to add extra imports.
 
 > **To uninstall:** delete the `chrome` folder and remove the Fennec lines from `user.js` in your profile directory (or delete `user.js` entirely if Fennec created it).
-
-**macOS / Linux:**
-```bash
-curl -fsSL https://raw.githubusercontent.com/tompassarelli/fennec/main/install.sh | bash
-```
-
-**Windows** (PowerShell):
-```powershell
-irm https://raw.githubusercontent.com/tompassarelli/fennec/main/install.ps1 | iex
-```
 
 #### Option B: Manual
 
