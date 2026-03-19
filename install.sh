@@ -6,40 +6,78 @@ LATEST_URL="https://api.github.com/repos/$REPO/releases/latest"
 
 FORCE=false
 NO_BACKUP=false
+USE_LIBREWOLF=false
 for arg in "$@"; do
     case $arg in
         --force) FORCE=true ;;
         --no-backup) NO_BACKUP=true ;;
+        --librewolf) USE_LIBREWOLF=true ;;
     esac
 done
+
+# Browser selection
+if [ "$USE_LIBREWOLF" = true ]; then
+    BROWSER_NAME="Librewolf"
+    BROWSER_PROCESS="librewolf"
+    PROFILE_PATTERN="*.default-default"
+elif [ -z "${FENNEC_LOCAL:-}" ] && [ -t 0 ]; then
+    echo "Select browser:"
+    echo "  1) Firefox (default)"
+    echo "  2) Librewolf"
+    read -rp "Choice [1]: " browser_choice
+    if [ "${browser_choice:-1}" = "2" ]; then
+        BROWSER_NAME="Librewolf"
+        BROWSER_PROCESS="librewolf"
+        PROFILE_PATTERN="*.default-default"
+    else
+        BROWSER_NAME="Firefox"
+        BROWSER_PROCESS="firefox"
+        PROFILE_PATTERN="*.default-release"
+    fi
+else
+    BROWSER_NAME="Firefox"
+    BROWSER_PROCESS="firefox"
+    PROFILE_PATTERN="*.default-release"
+fi
 
 tmp_dir=""
 cleanup() { if [ -n "$tmp_dir" ]; then rm -rf "$tmp_dir"; fi; }
 trap cleanup EXIT
 
-# Check if Firefox is running (skip in CI)
+# Check if browser is running (skip in CI)
 if [ -z "${FENNEC_LOCAL:-}" ]; then
-    if pgrep -x firefox >/dev/null 2>&1; then
-        echo "Firefox is currently running. Please close it before continuing."
-        read -rp "Press Enter to continue after closing Firefox..."
+    if pgrep -x "$BROWSER_PROCESS" >/dev/null 2>&1; then
+        echo "$BROWSER_NAME is currently running. Please close it before continuing."
+        read -rp "Press Enter to continue after closing $BROWSER_NAME..."
     fi
 fi
 
-# Locate the Firefox profiles directory
+# Locate the profiles directory
 case "$(uname -s)" in
     Darwin)
-        profiles_dir="$HOME/Library/Application Support/Firefox/Profiles"
+        if [ "$BROWSER_NAME" = "Librewolf" ]; then
+            profiles_dir="$HOME/Library/Application Support/librewolf/Profiles"
+        else
+            profiles_dir="$HOME/Library/Application Support/Firefox/Profiles"
+        fi
         ;;
     Linux)
-        # Flatpak location takes priority if it exists
-        flatpak_dir="$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox"
-        native_dir="$HOME/.mozilla/firefox"
+        if [ "$BROWSER_NAME" = "Librewolf" ]; then
+            flatpak_dir="$HOME/.var/app/io.gitlab.librewolf-community.LibreWolf/.librewolf"
+            xdg_dir="${XDG_CONFIG_HOME:-$HOME/.config}/librewolf/librewolf"
+            native_dir="$HOME/.librewolf"
+        else
+            flatpak_dir="$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox"
+            native_dir="$HOME/.mozilla/firefox"
+        fi
         if [ -d "$flatpak_dir" ]; then
             profiles_dir="$flatpak_dir"
+        elif [ -n "${xdg_dir:-}" ] && [ -d "$xdg_dir" ]; then
+            profiles_dir="$xdg_dir"
         elif [ -d "$native_dir" ]; then
             profiles_dir="$native_dir"
         else
-            echo "Error: No Firefox profile directory found."
+            echo "Error: No $BROWSER_NAME profile directory found."
             exit 1
         fi
         ;;
@@ -49,11 +87,11 @@ case "$(uname -s)" in
         ;;
 esac
 
-# Find profile directories (*.default-release is the typical active profile)
+# Find profile directories (browser-specific pattern first, then fallback)
 profiles=()
 while IFS= read -r dir; do
     profiles+=("$dir")
-done < <(find "$profiles_dir" -maxdepth 1 -type d -name '*.default-release' 2>/dev/null)
+done < <(find "$profiles_dir" -maxdepth 1 -type d -name "$PROFILE_PATTERN" 2>/dev/null)
 
 if [ ${#profiles[@]} -eq 0 ]; then
     # Fall back to any profile directory
@@ -63,7 +101,7 @@ if [ ${#profiles[@]} -eq 0 ]; then
 fi
 
 if [ ${#profiles[@]} -eq 0 ]; then
-    echo "Error: No Firefox profiles found in $profiles_dir"
+    echo "Error: No $BROWSER_NAME profiles found in $profiles_dir"
     exit 1
 fi
 
@@ -71,7 +109,7 @@ fi
 if [ ${#profiles[@]} -eq 1 ]; then
     profile="${profiles[0]}"
 else
-    echo "Multiple Firefox profiles found:"
+    echo "Multiple $BROWSER_NAME profiles found:"
     for i in "${!profiles[@]}"; do
         echo "  $((i + 1))) $(basename "${profiles[$i]}")"
     done
@@ -169,7 +207,7 @@ if [ "$LEGACY_MIGRATED" = true ]; then
     echo "Move any personal tweaks from that file into chrome/user/user.css"
 fi
 
-# Configure Firefox preferences in user.js
+# Configure browser preferences in user.js
 user_js="$profile/user.js"
 
 set_pref() {
@@ -185,4 +223,4 @@ set_pref "toolkit.legacyUserProfileCustomizations.stylesheets" "true"
 set_pref "sidebar.verticalTabs" "false"
 set_pref "sidebar.revamp" "false"
 
-echo "Done. Restart Firefox for changes to take effect."
+echo "Done. Restart $BROWSER_NAME for changes to take effect."

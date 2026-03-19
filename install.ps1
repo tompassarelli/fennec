@@ -6,32 +6,62 @@ $latestUrl = "https://api.github.com/repos/$repo/releases/latest"
 
 $force = $args -contains "--force" -or $args -contains "-Force"
 $noBackup = $args -contains "--no-backup"
+$useLibrewolf = $args -contains "--librewolf"
+
+# Browser selection
+if ($useLibrewolf) {
+    $browserName = "Librewolf"
+    $browserProcess = "librewolf"
+    $profilePattern = "*.default-default"
+} elseif (-not $env:FENNEC_LOCAL -and [Environment]::UserInteractive) {
+    Write-Host "Select browser:"
+    Write-Host "  1) Firefox (default)"
+    Write-Host "  2) Librewolf"
+    $browserChoice = Read-Host "Choice [1]"
+    if ($browserChoice -eq "2") {
+        $browserName = "Librewolf"
+        $browserProcess = "librewolf"
+        $profilePattern = "*.default-default"
+    } else {
+        $browserName = "Firefox"
+        $browserProcess = "firefox"
+        $profilePattern = "*.default-release"
+    }
+} else {
+    $browserName = "Firefox"
+    $browserProcess = "firefox"
+    $profilePattern = "*.default-release"
+}
 
 $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "fennec-install-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
 
 try {
-    # Check if Firefox is running (skip in CI)
+    # Check if browser is running (skip in CI)
     if (-not $env:FENNEC_LOCAL) {
-        if (Get-Process firefox -ErrorAction SilentlyContinue) {
-            Write-Host "Firefox is currently running. Please close it before continuing."
-            Read-Host "Press Enter to continue after closing Firefox"
+        if (Get-Process $browserProcess -ErrorAction SilentlyContinue) {
+            Write-Host "$browserName is currently running. Please close it before continuing."
+            Read-Host "Press Enter to continue after closing $browserName"
         }
     }
 
-    # Locate Firefox profiles directory
-    $profilesDir = Join-Path $env:APPDATA "Mozilla\Firefox\Profiles"
+    # Locate profiles directory
+    if ($browserName -eq "Librewolf") {
+        $profilesDir = Join-Path $env:APPDATA "librewolf\Profiles"
+    } else {
+        $profilesDir = Join-Path $env:APPDATA "Mozilla\Firefox\Profiles"
+    }
     if (-not (Test-Path $profilesDir)) {
-        Write-Error "No Firefox profile directory found at $profilesDir"
+        Write-Error "No $browserName profile directory found at $profilesDir"
         exit 1
     }
 
     # Find profile directories
-    $profiles = Get-ChildItem -Path $profilesDir -Directory -Filter "*.default-release" 2>$null
+    $profiles = Get-ChildItem -Path $profilesDir -Directory -Filter $profilePattern 2>$null
     if (-not $profiles) {
         $profiles = Get-ChildItem -Path $profilesDir -Directory -Filter "*.*" 2>$null
     }
     if (-not $profiles) {
-        Write-Error "No Firefox profiles found in $profilesDir"
+        Write-Error "No $browserName profiles found in $profilesDir"
         exit 1
     }
 
@@ -39,7 +69,7 @@ try {
     if ($profiles.Count -eq 1) {
         $profile = $profiles[0]
     } else {
-        Write-Host "Multiple Firefox profiles found:"
+        Write-Host "Multiple $browserName profiles found:"
         for ($i = 0; $i -lt $profiles.Count; $i++) {
             Write-Host "  $($i + 1)) $($profiles[$i].Name)"
         }
@@ -165,10 +195,10 @@ try {
         Write-Host "Move any personal tweaks from that file into chrome\user\user.css"
     }
 
-    # Configure Firefox preferences in user.js
+    # Configure browser preferences in user.js
     $userJs = Join-Path $profile.FullName "user.js"
 
-    function Set-FirefoxPref {
+    function Set-BrowserPref {
         param([string]$Key, [string]$Value)
         $line = "user_pref(`"$Key`", $Value);"
         $needsPref = $true
@@ -184,11 +214,11 @@ try {
         }
     }
 
-    Set-FirefoxPref "toolkit.legacyUserProfileCustomizations.stylesheets" "true"
-    Set-FirefoxPref "sidebar.verticalTabs" "false"
-    Set-FirefoxPref "sidebar.revamp" "false"
+    Set-BrowserPref "toolkit.legacyUserProfileCustomizations.stylesheets" "true"
+    Set-BrowserPref "sidebar.verticalTabs" "false"
+    Set-BrowserPref "sidebar.revamp" "false"
 
-    Write-Host "Done. Restart Firefox for changes to take effect."
+    Write-Host "Done. Restart $browserName for changes to take effect."
 } finally {
     # Clean up temp directory
     if (Test-Path $tmpDir) {

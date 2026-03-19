@@ -15,20 +15,24 @@ on:
       - chrome/**
 
 jobs:
+  # Firefox on ubuntu-latest is a snap, which stores profiles at
+  # ~/snap/firefox/... instead of ~/.mozilla/firefox. The installer
+  # targets the native path (correct for non-snap installs). Snap
+  # Firefox support is tracked separately.
   test-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create fake native profile
-        run: mkdir -p ~/.mozilla/firefox/fake.default-release
+      - name: Create Firefox profile
+        run: mkdir -p ~/.mozilla/firefox/test.default-release
 
       - name: Run install script
         run: FENNEC_LOCAL=. ./install.sh
 
       - name: Verify installation
         run: |
-          profile="$HOME/.mozilla/firefox/fake.default-release"
+          profile="$HOME/.mozilla/firefox/test.default-release"
 
           test -d "$profile/chrome/fennec" || { echo "FAIL: chrome/fennec/ missing"; exit 1; }
           test -f "$profile/chrome/fennec/fennec.css" || { echo "FAIL: fennec/fennec.css missing"; exit 1; }
@@ -46,11 +50,14 @@ jobs:
           cat "$profile/user.js"
 
   test-linux-flatpak:
+    # Tests Flatpak path priority — no Flatpak runtime in CI, so we
+    # create the directory structure to verify the installer prefers
+    # the Flatpak path over native when both could exist.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create fake Flatpak profile
+      - name: Create Flatpak profile directory
         run: mkdir -p ~/.var/app/org.mozilla.firefox/.mozilla/firefox/fake.default-release
 
       - name: Run install script
@@ -83,15 +90,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create fake macOS profile
-        run: mkdir -p ~/Library/Application\ Support/Firefox/Profiles/fake.default-release
+      - name: Create Firefox profile
+        run: /Applications/Firefox.app/Contents/MacOS/firefox -CreateProfile default-release
+
+      - name: Verify profile path
+        run: |
+          test -d "$HOME/Library/Application Support/Firefox/Profiles" || { echo "FAIL: Firefox/Profiles not created"; exit 1; }
+          ls -la "$HOME/Library/Application Support/Firefox/Profiles/"
 
       - name: Run install script
         run: FENNEC_LOCAL=. ./install.sh
 
       - name: Verify installation
         run: |
-          profile="$HOME/Library/Application Support/Firefox/Profiles/fake.default-release"
+          profile=$(find "$HOME/Library/Application Support/Firefox/Profiles" -maxdepth 1 -type d -name '*.default-release' | head -1)
+          test -n "$profile" || { echo "FAIL: no *.default-release profile found"; exit 1; }
 
           test -d "$profile/chrome/fennec" || { echo "FAIL: chrome/fennec/ missing"; exit 1; }
           test -f "$profile/chrome/fennec/fennec.css" || { echo "FAIL: fennec/fennec.css missing"; exit 1; }
@@ -110,9 +123,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create fake Windows profile
+      - name: Create Firefox profile
         shell: pwsh
-        run: New-Item -ItemType Directory -Path "$env:APPDATA\Mozilla\Firefox\Profiles\fake.default-release" -Force
+        run: |
+          $ff = (Get-Command firefox -ErrorAction SilentlyContinue).Source
+          if (-not $ff) {
+            $ff = (Get-ChildItem "C:\Program Files\Mozilla Firefox\firefox.exe" -ErrorAction SilentlyContinue).FullName
+          }
+          & $ff -CreateProfile default-release
+
+      - name: Verify profile path
+        shell: pwsh
+        run: |
+          $profilesDir = "$env:APPDATA\Mozilla\Firefox\Profiles"
+          if (-not (Test-Path $profilesDir)) { Write-Error "FAIL: $profilesDir not created"; exit 1 }
+          Get-ChildItem $profilesDir
 
       - name: Run install script
         shell: pwsh
@@ -123,39 +148,40 @@ jobs:
       - name: Verify installation
         shell: pwsh
         run: |
-          $prof = "$env:APPDATA\Mozilla\Firefox\Profiles\fake.default-release"
+          $prof = Get-ChildItem "$env:APPDATA\Mozilla\Firefox\Profiles" -Directory -Filter "*.default-release" | Select-Object -First 1
+          if (-not $prof) { Write-Error "FAIL: no *.default-release profile found"; exit 1 }
 
-          if (-not (Test-Path "$prof\chrome\fennec")) { Write-Error "FAIL: chrome\fennec\ missing"; exit 1 }
-          if (-not (Test-Path "$prof\chrome\fennec\fennec.css")) { Write-Error "FAIL: fennec\fennec.css missing"; exit 1 }
-          if (-not (Test-Path "$prof\chrome\fennec\autohide.css")) { Write-Error "FAIL: fennec\autohide.css missing"; exit 1 }
-          if (-not (Test-Path "$prof\chrome\userChrome.css")) { Write-Error "FAIL: userChrome.css missing"; exit 1 }
-          if (-not (Test-Path "$prof\chrome\user\user.css")) { Write-Error "FAIL: user\user.css missing"; exit 1 }
-          $userChrome = Get-Content "$prof\chrome\userChrome.css" -Raw
+          if (-not (Test-Path "$($prof.FullName)\chrome\fennec")) { Write-Error "FAIL: chrome\fennec\ missing"; exit 1 }
+          if (-not (Test-Path "$($prof.FullName)\chrome\fennec\fennec.css")) { Write-Error "FAIL: fennec\fennec.css missing"; exit 1 }
+          if (-not (Test-Path "$($prof.FullName)\chrome\fennec\autohide.css")) { Write-Error "FAIL: fennec\autohide.css missing"; exit 1 }
+          if (-not (Test-Path "$($prof.FullName)\chrome\userChrome.css")) { Write-Error "FAIL: userChrome.css missing"; exit 1 }
+          if (-not (Test-Path "$($prof.FullName)\chrome\user\user.css")) { Write-Error "FAIL: user\user.css missing"; exit 1 }
+          $userChrome = Get-Content "$($prof.FullName)\chrome\userChrome.css" -Raw
           if ($userChrome -notmatch '@import url\("fennec/fennec.css"\)') { Write-Error "FAIL: fennec.css import missing"; exit 1 }
-          $userJs = Get-Content "$prof\user.js" -Raw
+          $userJs = Get-Content "$($prof.FullName)\user.js" -Raw
           if ($userJs -notmatch "toolkit.legacyUserProfileCustomizations.stylesheets") { Write-Error "FAIL: stylesheets pref missing"; exit 1 }
           if ($userJs -notmatch "sidebar.verticalTabs") { Write-Error "FAIL: sidebar.verticalTabs pref missing"; exit 1 }
           if ($userJs -notmatch "sidebar.revamp") { Write-Error "FAIL: sidebar.revamp pref missing"; exit 1 }
 
           Write-Host "--- chrome/ contents ---"
-          Get-ChildItem "$prof\chrome" -Recurse
+          Get-ChildItem "$($prof.FullName)\chrome" -Recurse
           Write-Host "--- user.js ---"
-          Get-Content "$prof\user.js"
+          Get-Content "$($prof.FullName)\user.js"
 
   test-preservation:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create fake profile
-        run: mkdir -p ~/.mozilla/firefox/fake.default-release
+      - name: Create Firefox profile
+        run: mkdir -p ~/.mozilla/firefox/test.default-release
 
       - name: First install
         run: FENNEC_LOCAL=. ./install.sh
 
       - name: Simulate user customizations
         run: |
-          profile="$HOME/.mozilla/firefox/fake.default-release"
+          profile="$HOME/.mozilla/firefox/test.default-release"
           echo "/* MY CUSTOM CSS */" >> "$profile/chrome/user/user.css"
           echo "/* MY ENTRY POINT EDIT */" >> "$profile/chrome/userChrome.css"
 
@@ -164,7 +190,7 @@ jobs:
 
       - name: Verify preservation
         run: |
-          profile="$HOME/.mozilla/firefox/fake.default-release"
+          profile="$HOME/.mozilla/firefox/test.default-release"
 
           grep -q "MY CUSTOM CSS" "$profile/chrome/user/user.css" || { echo "FAIL: user.css was overwritten"; exit 1; }
           grep -q "MY ENTRY POINT EDIT" "$profile/chrome/userChrome.css" || { echo "FAIL: userChrome.css was overwritten"; exit 1; }
@@ -177,11 +203,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create fake profile with old monolithic userChrome.css
+      - name: Create Firefox profile with legacy userChrome.css
         run: |
-          profile="$HOME/.mozilla/firefox/fake.default-release"
+          profile="$HOME/.mozilla/firefox/test.default-release"
           mkdir -p "$profile/chrome"
-          # Simulate old monolithic userChrome.css with legacy markers
           cat > "$profile/chrome/userChrome.css" << 'LEGACY'
           /* #region dev-docs */
           /* old fennec monolithic CSS */
@@ -195,7 +220,7 @@ jobs:
 
       - name: Verify legacy migration
         run: |
-          profile="$HOME/.mozilla/firefox/fake.default-release"
+          profile="$HOME/.mozilla/firefox/test.default-release"
 
           # Legacy file should be backed up
           test -f "$profile/chrome/userChrome.css.legacy" || { echo "FAIL: legacy backup missing"; exit 1; }
@@ -208,3 +233,141 @@ jobs:
           test -f "$profile/chrome/fennec/fennec.css" || { echo "FAIL: fennec.css missing"; exit 1; }
 
           echo "Legacy migration test passed."
+
+  test-linux-librewolf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Librewolf
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y extrepo xvfb
+          sudo extrepo enable librewolf
+          sudo apt-get update
+          sudo apt-get install -y librewolf
+
+      - name: Create real Librewolf profile
+        run: xvfb-run --auto-servernum librewolf -CreateProfile default-default
+
+      - name: Verify profile path
+        run: |
+          # Librewolf deb uses XDG path ~/.config/librewolf/librewolf/
+          profiles_dir="${XDG_CONFIG_HOME:-$HOME/.config}/librewolf/librewolf"
+          test -d "$profiles_dir" || { echo "FAIL: $profiles_dir not created"; exit 1; }
+          echo "Profile root confirmed at $profiles_dir"
+          ls -la "$profiles_dir/"
+
+      - name: Run install script with --librewolf
+        run: FENNEC_LOCAL=. ./install.sh --librewolf
+
+      - name: Verify installation
+        run: |
+          profiles_dir="${XDG_CONFIG_HOME:-$HOME/.config}/librewolf/librewolf"
+          profile=$(find "$profiles_dir" -maxdepth 1 -type d -name '*.default-default' | head -1)
+          test -n "$profile" || { echo "FAIL: no *.default-default profile found"; exit 1; }
+
+          test -d "$profile/chrome/fennec" || { echo "FAIL: chrome/fennec/ missing"; exit 1; }
+          test -f "$profile/chrome/fennec/fennec.css" || { echo "FAIL: fennec/fennec.css missing"; exit 1; }
+          test -f "$profile/chrome/fennec/autohide.css" || { echo "FAIL: fennec/autohide.css missing"; exit 1; }
+          test -f "$profile/chrome/userChrome.css" || { echo "FAIL: userChrome.css missing"; exit 1; }
+          test -f "$profile/chrome/user/user.css" || { echo "FAIL: user/user.css missing"; exit 1; }
+          grep -q '@import url("fennec/fennec.css")' "$profile/chrome/userChrome.css" || { echo "FAIL: fennec.css import missing"; exit 1; }
+          grep -q 'toolkit.legacyUserProfileCustomizations.stylesheets' "$profile/user.js" || { echo "FAIL: stylesheets pref missing"; exit 1; }
+
+          echo "--- chrome/ contents ---"
+          ls -laR "$profile/chrome/"
+          echo "--- user.js ---"
+          cat "$profile/user.js"
+
+  test-macos-librewolf:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Librewolf
+        run: brew install --cask librewolf
+
+      - name: Create real Librewolf profile
+        run: /Applications/LibreWolf.app/Contents/MacOS/librewolf -CreateProfile default-default
+
+      - name: Verify profile path
+        run: |
+          test -d "$HOME/Library/Application Support/librewolf/Profiles" || { echo "FAIL: librewolf/Profiles not created"; exit 1; }
+          echo "Profile root confirmed"
+          ls -la "$HOME/Library/Application Support/librewolf/Profiles/"
+
+      - name: Run install script with --librewolf
+        run: FENNEC_LOCAL=. ./install.sh --librewolf
+
+      - name: Verify installation
+        run: |
+          profile=$(find "$HOME/Library/Application Support/librewolf/Profiles" -maxdepth 1 -type d -name '*.default-default' | head -1)
+          test -n "$profile" || { echo "FAIL: no *.default-default profile found"; exit 1; }
+
+          test -d "$profile/chrome/fennec" || { echo "FAIL: chrome/fennec/ missing"; exit 1; }
+          test -f "$profile/chrome/fennec/fennec.css" || { echo "FAIL: fennec/fennec.css missing"; exit 1; }
+          test -f "$profile/chrome/fennec/autohide.css" || { echo "FAIL: fennec/autohide.css missing"; exit 1; }
+          test -f "$profile/chrome/userChrome.css" || { echo "FAIL: userChrome.css missing"; exit 1; }
+          test -f "$profile/chrome/user/user.css" || { echo "FAIL: user/user.css missing"; exit 1; }
+          grep -q '@import url("fennec/fennec.css")' "$profile/chrome/userChrome.css" || { echo "FAIL: fennec.css import missing"; exit 1; }
+          grep -q 'toolkit.legacyUserProfileCustomizations.stylesheets' "$profile/user.js" || { echo "FAIL: stylesheets pref missing"; exit 1; }
+
+          echo "--- chrome/ contents ---"
+          ls -laR "$profile/chrome/"
+          echo "--- user.js ---"
+          cat "$profile/user.js"
+
+  test-windows-librewolf:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Librewolf
+        shell: pwsh
+        run: choco install librewolf -y
+
+      - name: Create real Librewolf profile
+        shell: pwsh
+        run: |
+          $lwPath = (Get-Command librewolf -ErrorAction SilentlyContinue).Source
+          if (-not $lwPath) {
+            $lwExe = Get-ChildItem "C:\Program Files\LibreWolf\librewolf.exe" -ErrorAction SilentlyContinue
+            if ($lwExe) { $lwPath = $lwExe.FullName }
+          }
+          & $lwPath -CreateProfile default-default
+
+      - name: Verify profile path
+        shell: pwsh
+        run: |
+          $lwProfiles = "$env:APPDATA\librewolf\Profiles"
+          if (-not (Test-Path $lwProfiles)) { Write-Error "FAIL: $lwProfiles not created"; exit 1 }
+          Write-Host "Profile root confirmed at $lwProfiles"
+          Get-ChildItem $lwProfiles
+
+      - name: Run install script with --librewolf
+        shell: pwsh
+        run: |
+          $env:FENNEC_LOCAL = "."
+          .\install.ps1 --librewolf
+
+      - name: Verify installation
+        shell: pwsh
+        run: |
+          $prof = Get-ChildItem "$env:APPDATA\librewolf\Profiles" -Directory -Filter "*.default-default" | Select-Object -First 1
+          if (-not $prof) { Write-Error "FAIL: no *.default-default profile found"; exit 1 }
+
+          if (-not (Test-Path "$($prof.FullName)\chrome\fennec")) { Write-Error "FAIL: chrome\fennec\ missing"; exit 1 }
+          if (-not (Test-Path "$($prof.FullName)\chrome\fennec\fennec.css")) { Write-Error "FAIL: fennec\fennec.css missing"; exit 1 }
+          if (-not (Test-Path "$($prof.FullName)\chrome\fennec\autohide.css")) { Write-Error "FAIL: fennec\autohide.css missing"; exit 1 }
+          if (-not (Test-Path "$($prof.FullName)\chrome\userChrome.css")) { Write-Error "FAIL: userChrome.css missing"; exit 1 }
+          if (-not (Test-Path "$($prof.FullName)\chrome\user\user.css")) { Write-Error "FAIL: user\user.css missing"; exit 1 }
+          $userChrome = Get-Content "$($prof.FullName)\chrome\userChrome.css" -Raw
+          if ($userChrome -notmatch '@import url\("fennec/fennec.css"\)') { Write-Error "FAIL: fennec.css import missing"; exit 1 }
+          $userJs = Get-Content "$($prof.FullName)\user.js" -Raw
+          if ($userJs -notmatch "toolkit.legacyUserProfileCustomizations.stylesheets") { Write-Error "FAIL: stylesheets pref missing"; exit 1 }
+
+          Write-Host "--- chrome/ contents ---"
+          Get-ChildItem "$($prof.FullName)\chrome" -Recurse
+          Write-Host "--- user.js ---"
+          Get-Content "$($prof.FullName)\user.js"
