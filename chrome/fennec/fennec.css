@@ -688,6 +688,67 @@ body:has(#sidebar-box[hidden]):has(#identity-box.notSecure)::before {
 
 /* #endregion urlbar */
 
+/* #region findbar */
+
+.browserContainer > findbar {
+  position: absolute;
+  bottom: 8px;
+  right: 16px;
+  width: 320px;
+  padding: 4px 8px !important;
+  background: var(--fen-color) !important;
+  border: 1px solid color-mix(in srgb, currentColor, transparent 87%) !important;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1) !important;
+  animation: findbar-show var(--fen-ts-2);
+}
+
+.browserContainer > findbar[hidden] {
+  display: flex !important;
+  bottom: -100px;
+  transition: bottom var(--fen-ts-2) !important;
+}
+
+.browserContainer > findbar .findbar-textbox {
+  background: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+.browserContainer > findbar .findbar-closebutton {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  right: 12px;
+  margin: 0 !important;
+  padding: 4px !important;
+}
+
+@keyframes findbar-show {
+  0% { bottom: -100px; }
+  100% { bottom: 8px; }
+}
+
+/* #endregion findbar */
+
+/* #region context menu */
+
+@media not (-moz-platform: macos) {
+  menupopup {
+    --panel-padding: 5px 4px !important;
+  }
+  menu, menuitem, menucaption {
+    --menuitem-border-radius: 5px !important;
+    --menuitem-margin: 1px 1px;
+  }
+  menuseparator {
+    padding-inline: 10px !important;
+  }
+}
+
+/* #endregion context menu */
+
 /* #region sidebar */
 
 /* smallest width seems to be 224px */
