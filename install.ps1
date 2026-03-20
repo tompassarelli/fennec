@@ -10,16 +10,16 @@ $useLibrewolf = $args -contains "--librewolf"
 
 # Browser selection
 if ($useLibrewolf) {
-    $browserName = "Librewolf"
+    $browserName = "LibreWolf"
     $browserProcess = "librewolf"
     $profilePattern = "*.default-default"
 } elseif (-not $env:FENNEC_LOCAL -and [Environment]::UserInteractive) {
     Write-Host "Select browser:"
     Write-Host "  1) Firefox (default)"
-    Write-Host "  2) Librewolf"
+    Write-Host "  2) LibreWolf"
     $browserChoice = Read-Host "Choice [1]"
     if ($browserChoice -eq "2") {
-        $browserName = "Librewolf"
+        $browserName = "LibreWolf"
         $browserProcess = "librewolf"
         $profilePattern = "*.default-default"
     } else {
@@ -45,7 +45,7 @@ try {
     }
 
     # Locate profiles directory
-    if ($browserName -eq "Librewolf") {
+    if ($browserName -eq "LibreWolf") {
         $profilesDir = Join-Path $env:APPDATA "librewolf\Profiles"
     } else {
         $profilesDir = Join-Path $env:APPDATA "Mozilla\Firefox\Profiles"

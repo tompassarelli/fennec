@@ -246,7 +246,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Librewolf
+      - name: Install LibreWolf
         run: |
           sudo apt-get update
           sudo apt-get install -y extrepo xvfb
@@ -254,12 +254,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y librewolf
 
-      - name: Create real Librewolf profile
+      - name: Create real LibreWolf profile
         run: xvfb-run --auto-servernum librewolf -CreateProfile default-default
 
       - name: Verify profile path
         run: |
-          # Librewolf deb uses XDG path ~/.config/librewolf/librewolf/
+          # LibreWolf deb uses XDG path ~/.config/librewolf/librewolf/
           profiles_dir="${XDG_CONFIG_HOME:-$HOME/.config}/librewolf/librewolf"
           test -d "$profiles_dir" || { echo "FAIL: $profiles_dir not created"; exit 1; }
           echo "Profile root confirmed at $profiles_dir"
@@ -292,10 +292,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Librewolf
+      - name: Install LibreWolf
         run: brew install --cask librewolf
 
-      - name: Create real Librewolf profile
+      - name: Create real LibreWolf profile
         run: /Applications/LibreWolf.app/Contents/MacOS/librewolf -CreateProfile default-default
 
       - name: Verify profile path
@@ -330,11 +330,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Librewolf
+      - name: Install LibreWolf
         shell: pwsh
         run: choco install librewolf -y
 
-      - name: Create real Librewolf profile
+      - name: Create real LibreWolf profile
         shell: pwsh
         run: |
           $lwPath = (Get-Command librewolf -ErrorAction SilentlyContinue).Source

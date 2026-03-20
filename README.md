@@ -1,6 +1,6 @@
 # Fennec
 
-Fennec is a minimal Firefox/Librewolf setup built with userChrome.css, designed around vertical tabs, zen mode, and keyboard-driven browsing. No fork, no build — the sidebar-first workflow of Zen Browser without leaving Firefox.
+Fennec is a minimal Firefox/LibreWolf setup built with userChrome.css, bringing a Zen-style sidebar workflow to stock Firefox or LibreWolf with no fork and no build.
 
 | Sidebar Open | Zen Mode |
 |:---:|:---:|
@@ -8,27 +8,33 @@ Fennec is a minimal Firefox/Librewolf setup built with userChrome.css, designed 
 
 ## Features
 
-🔗 **Enhanced Sideberry Integration** - Urlbar inside the sidebar, tracks width, and expands when focused
+🧩 **Enhanced Sidebery Integration** - Urlbar in the sidebar, expands on focus, tracks sidebar width
 
-🧘 **Zen Mode** - Toggling the sidebar hides the UI, maximizing screen space and aiding focus when tiled or maximized
+🧘 **Zen Mode** - Toggle the sidebar to hide the UI and maximize focus
 
-✨ **Minimal Chrome** - Only essential objects exposed, coherent with a keyboard driven UX
+✨ **Minimal Chrome** - Only the essentials, coherent with a keyboard-driven UX
 
-🤝 **Community Minded** - Clean code and detailed docs to support customization and contribution
+🤝 **Built to Customize** - Clean code and detailed docs to support customization and contribution
 
 🎨 **Theme Support** - System themes (light/dark) and user-created Firefox themes supported
 
+## Why Fennec?
+
+Fennec is for people who want the Zen-style sidebar workflow while staying on stock Firefox or LibreWolf.
+
+- No browser fork — just CSS
+- Update-safe customizations — your tweaks survive Fennec updates
+- Works on Firefox and LibreWolf
+
 ## Installation
 
-> Please see [security considerations](#security-considerations) before installing
+> Please see [security considerations](#security) before installing
 
 ### 1. Install the Sideberry Extension
 
 Install [Sideberry](https://addons.mozilla.org/en-US/firefox/addon/sidebery/) from Firefox Add-ons.
 
 ### 2. Install CSS
-
-Choose **one** of the two methods below:
 
 #### Option A: Automated (recommended)
 
@@ -42,10 +48,10 @@ curl -fsSL https://raw.githubusercontent.com/tompassarelli/fennec/main/install.s
 irm https://raw.githubusercontent.com/tompassarelli/fennec/main/install.ps1 | iex
 ```
 
-**Librewolf:** add `--librewolf` to either command, or select Librewolf when prompted interactively.
+**LibreWolf:** add `--librewolf` to either command, or select LibreWolf when prompted interactively.
 
 The script does the following:
-- Detects Firefox or Librewolf profile directories (including Flatpak and XDG paths on Linux)
+- Detects Firefox or LibreWolf profile directories (including Flatpak and XDG paths on Linux)
 - Copies core files (`fennec/fennec.css`, `fennec/autohide.css`) into your profile — always updated
 - Creates `userChrome.css` (entry point) and `user/user.css` (your customizations) if they don't exist — preserved on update
 - Writes prefs to `user.js`: disables vertical tabs, disables the sidebar revamp, enables custom stylesheets
@@ -76,8 +82,8 @@ Fennec updates `chrome/fennec/`. Your tweaks live in `chrome/user/`. `userChrome
 **Locate your profile directory:**
 1. Go to `about:support` in the address bar
 2. Under "Application Basics", click **Open Profile Folder**
-   - Flatpak users: the profile directory is at `~/.var/app/org.mozilla.firefox/.mozilla/firefox/<profile>`
-   - Librewolf users: check `~/.librewolf/` or `~/.config/librewolf/librewolf/` on Linux
+   - **Flatpak:** `~/.var/app/org.mozilla.firefox/.mozilla/firefox/<profile>`
+   - **LibreWolf:** `~/.librewolf/` or `~/.config/librewolf/librewolf/`
 
 **Copy the CSS files:**
 1. Inside the profile folder, create a `chrome` directory if it doesn't already exist
@@ -110,7 +116,7 @@ programs.fennec = {
   profile = "your-profile-name";  # optional, defaults to "default-release"
   autohide = false;               # optional
   extraConfig = ''                # optional, appended to user/user.css
-    :root { --fen-gap-x: 15px; }
+    :root { --fen-gap-x: 12px; }
   '';
 };
 ```
@@ -135,12 +141,24 @@ To enable:
 - **Fennec Update Notifier** (coming soon) - Get notified when a new version of Fennec is available
 - **[Vimium](https://addons.mozilla.org/en-US/firefox/addon/vimium-ff/)** - Keyboard-driven navigation that complements the minimal, distraction-free interface
 
-## Help 
+## Customization
 
-If something isn't working, check [open issues](https://github.com/tompassarelli/fennec/issues) or file a new one.
+Your tweaks live in `chrome/user/user.css` — this file is never overwritten by updates.
 
-## Security Considerations
+```css
+/* example: increase sidebar gap */
+:root {
+  --fen-gap-x: 12px;
+}
+```
 
-- The install guide directs users to download Firefox extensions. Firefox extensions can introduce security vulnerabilities and/or take direct hostile actions against users.
-- Zen Mode hides UI elements including security signals like padlock warnings. Fennec surfaces a custom HTTP-not-secure warning, but this is not a substitute for native browser indicators — verify pages before toggling the UI.
-- **Use at your own risk** — the author is not liable for any security issues, data breaches, or other damages. You are responsible for verifying the security of websites, code, and extensions used.
+## Security
+
+- Extensions are privileged software — install only ones you trust
+- Zen Mode hides browser security indicators like padlock warnings; verify pages before toggling the UI
+- Review install scripts before piping them into your shell
+- **Use at your own risk** — the author is not liable for any security issues, data breaches, or other damages
+
+## Status
+
+Actively maintained with recent releases and ongoing improvements. If something isn't working, check [open issues](https://github.com/tompassarelli/fennec/issues) or file a new one.

@@ -17,16 +17,16 @@ done
 
 # Browser selection
 if [ "$USE_LIBREWOLF" = true ]; then
-    BROWSER_NAME="Librewolf"
+    BROWSER_NAME="LibreWolf"
     BROWSER_PROCESS="librewolf"
     PROFILE_PATTERN="*.default-default"
 elif [ -z "${FENNEC_LOCAL:-}" ] && [ -t 0 ]; then
     echo "Select browser:"
     echo "  1) Firefox (default)"
-    echo "  2) Librewolf"
+    echo "  2) LibreWolf"
     read -rp "Choice [1]: " browser_choice
     if [ "${browser_choice:-1}" = "2" ]; then
-        BROWSER_NAME="Librewolf"
+        BROWSER_NAME="LibreWolf"
         BROWSER_PROCESS="librewolf"
         PROFILE_PATTERN="*.default-default"
     else
@@ -55,14 +55,14 @@ fi
 # Locate the profiles directory
 case "$(uname -s)" in
     Darwin)
-        if [ "$BROWSER_NAME" = "Librewolf" ]; then
+        if [ "$BROWSER_NAME" = "LibreWolf" ]; then
             profiles_dir="$HOME/Library/Application Support/librewolf/Profiles"
         else
             profiles_dir="$HOME/Library/Application Support/Firefox/Profiles"
         fi
         ;;
     Linux)
-        if [ "$BROWSER_NAME" = "Librewolf" ]; then
+        if [ "$BROWSER_NAME" = "LibreWolf" ]; then
             flatpak_dir="$HOME/.var/app/io.gitlab.librewolf-community.LibreWolf/.librewolf"
             xdg_dir="${XDG_CONFIG_HOME:-$HOME/.config}/librewolf/librewolf"
             native_dir="$HOME/.librewolf"
