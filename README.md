@@ -140,6 +140,10 @@ To enable:
 2. Set `fennec.autohide` to `true`
 3. Restart Firefox
 
+### Accessibility
+
+Fennec respects your OS "reduce motion" setting — all transitions become instant. On Linux you can also set `ui.prefersReducedMotion` to `1` in `about:config`.
+
 ### Recommended Extensions
 
 - **Fennec Update Notifier** (coming soon) - Get notified when a new version of Fennec is available

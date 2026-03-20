@@ -152,6 +152,10 @@ gap: space between components, like padding/margin
   
   /* minimize media query sprawl for resizing urlbar */
   --fen-max-width: 600px;
+
+  /* transition speed — set to 0s by reduced motion */
+  --fen-ts-2: 0.2s;
+  --fen-ts-3: 0.3s;
 }
 
 /* if a theme is present (like Firefox Color), respect it fully */
@@ -160,6 +164,14 @@ gap: space between components, like padding/margin
   --fen-header-bg-color: var(--toolbar-bgcolor);
   --fen-urlbar-bg-color: var(--toolbar-field-background-color);
   --fen-header-btn-dim: 1;
+}
+
+/* accessibility: disable all animations when OS "reduce motion" is on */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fen-ts-2: 0s;
+    --fen-ts-3: 0s;
+  }
 }
 
 /* #endregion css variables and theme handling */
@@ -185,7 +197,7 @@ gap: space between components, like padding/margin
   overflow: hidden !important;
   padding: 0 !important;
   opacity: 0 !important;
-  transition: width 0.3s ease, padding 0.3s step-end, opacity 0.2s ease !important;
+  transition: width var(--fen-ts-3) ease, padding var(--fen-ts-3) step-end, opacity var(--fen-ts-2) ease !important;
 }
 
 /* toggle the entire ui by toggling the sidebar */
@@ -194,7 +206,7 @@ body:has(#sidebar-box[hidden]:not(:hover)) #navigator-toolbox {
   overflow: hidden !important;
   pointer-events: none;
   opacity: 0 !important;
-  transition: width 0.3s ease, opacity 0.2s ease !important;
+  transition: width var(--fen-ts-3) ease, opacity var(--fen-ts-2) ease !important;
 }
 
 body:has(#sidebar-box[hidden]:not(:hover)) toolbaritem#urlbar-container {
@@ -209,7 +221,7 @@ body:has(#sidebar-box[hidden]) #identity-icon-box {
 
 body:has(#sidebar-box[hidden]) #urlbar {
   opacity: 0 !important;
-  transition: opacity 0.2s ease !important;
+  transition: opacity var(--fen-ts-2) ease !important;
 }
 
 /* #endregion dynamic sidebar toggle */
@@ -239,7 +251,7 @@ body:has(#sidebar-box[hidden]) #urlbar {
     opacity: 0 !important;
     pointer-events: auto !important;
     z-index: 10 !important;
-    transition: width 0.3s ease, max-width 0.3s ease, margin-right 0.3s ease, padding 0.3s step-end, opacity 0.2s ease !important;
+    transition: width var(--fen-ts-3) ease, max-width var(--fen-ts-3) ease, margin-right var(--fen-ts-3) ease, padding var(--fen-ts-3) step-end, opacity var(--fen-ts-2) ease !important;
   }
 
   body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
@@ -248,7 +260,7 @@ body:has(#sidebar-box[hidden]) #urlbar {
     overflow: hidden !important;
     pointer-events: none;
     opacity: 0 !important;
-    transition: width 0.3s ease, opacity 0.2s ease !important;
+    transition: width var(--fen-ts-3) ease, opacity var(--fen-ts-2) ease !important;
   }
 
   body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
@@ -261,7 +273,7 @@ body:has(#sidebar-box[hidden]) #urlbar {
   body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
     #urlbar {
     opacity: 0 !important;
-    transition: opacity 0.2s ease !important;
+    transition: opacity var(--fen-ts-2) ease !important;
   }
 
   body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
@@ -290,7 +302,7 @@ body:has(#sidebar-box[hidden]) #urlbar {
   padding-top: var(--fen-gap-y) !important;
 /*   background-color: var(--fen-color) !important; */
   background-color: var(--fen-header-bg-color) !important;
-  transition: width 0.3s ease, opacity 0.3s ease 0.2s !important;
+  transition: width var(--fen-ts-3) ease, opacity var(--fen-ts-3) ease var(--fen-ts-2) !important;
 }
 
 /* the thing that comes up when you hold alt, there's already settings menu */
@@ -432,7 +444,7 @@ panel#appMenu-popup {
 }
 
 #urlbar {
-  transition: opacity 0.3s ease 0.2s !important;
+  transition: opacity var(--fen-ts-3) ease var(--fen-ts-2) !important;
 }
 /* moz setting: "Show sidebar" active */
 body:not(:has(#sidebar-main[hidden])) #urlbar-container {
@@ -533,7 +545,7 @@ body:has(#browser > #sidebar-box[style*="; width: 6"]) #urlbar-container { width
 
 #urlbar:is([breakout-extend]) #tracking-protection-icon-container,
 #tracking-protection-icon-container:has([open]) {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--fen-ts-2) ease;
   position: relative !important;
   left: 0px;
   top: 50%;
@@ -548,7 +560,7 @@ body:has(#browser > #sidebar-box[style*="; width: 6"]) #urlbar-container { width
 }
 #urlbar:is([breakout-extend]) #identity-permission-box,
 #identity-permission-box:has([open]) {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--fen-ts-2) ease;
   position: relative !important;
   left: 0px;
   top: 50%;
@@ -662,7 +674,7 @@ body:has(#sidebar-box[hidden]):has(#identity-box.notSecure)::before {
   min-width: 0px !important;
   padding-left: var(--fen-gap-x);
   background-color: var(--fen-color) !important;
-  transition: width 0.3s ease, max-width 0.3s ease, margin-right 0.3s ease, padding 0.3s step-start, opacity 0.3s ease 0.2s !important;
+  transition: width var(--fen-ts-3) ease, max-width var(--fen-ts-3) ease, margin-right var(--fen-ts-3) ease, padding var(--fen-ts-3) step-start, opacity var(--fen-ts-3) ease var(--fen-ts-2) !important;
 }
 
 /* Remove the "Sideberry", "History", etc. sidepanel header  */
