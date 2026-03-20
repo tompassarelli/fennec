@@ -196,6 +196,11 @@ gap: space between components, like padding/margin
   }
 }
 
+/* disable transitions while dragging the sidebar splitter */
+body:has(#sidebar-splitter:active) * {
+  transition: none !important;
+}
+
 /* #endregion css variables and theme handling */
 
 
