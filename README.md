@@ -1,6 +1,6 @@
 # Fennec
 
-Fennec is a minimal Firefox/LibreWolf setup built with userChrome.css, bringing a Zen-style sidebar workflow to stock Firefox or LibreWolf with no fork and no build.
+Fennec is a minimal, customizable Firefox/LibreWolf setup built with userChrome.css, bringing a Zen-style sidebar workflow to stock Firefox or LibreWolf — no fork, no build.
 
 | Sidebar Open | Zen Mode |
 |:---:|:---:|
