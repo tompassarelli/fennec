@@ -152,7 +152,7 @@ gap: space between components, like padding/margin
   --fen-urlbar-border-radius: 4px;
   
   /* minimize media query sprawl for resizing urlbar */
-  --fen-max-width: 600px;
+  --fen-max-width: 300px;
 
   /* transition speed — set to 0s by reduced motion */
   --fen-ts-2: 0.2s;
@@ -501,7 +501,7 @@ body:not(:has(#sidebar-main[hidden])) #urlbar-background {
 
 /* selecting style instead of width because width isn't available at start */
 /* 200s */
-body:has(#browser > #sidebar-box[style*="; width: 23"]) #urlbar-container { width: 221px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 22"]) #urlbar-container { width: 211px !important; }
 body:has(#browser > #sidebar-box[style*="; width: 23"]) #urlbar-container { width: 221px !important; }
 body:has(#browser > #sidebar-box[style*="; width: 24"]) #urlbar-container { width: 231px !important; }
 body:has(#browser > #sidebar-box[style*="; width: 25"]) #urlbar-container { width: 241px !important; }
@@ -510,44 +510,8 @@ body:has(#browser > #sidebar-box[style*="; width: 27"]) #urlbar-container { widt
 body:has(#browser > #sidebar-box[style*="; width: 28"]) #urlbar-container { width: 271px !important; }
 body:has(#browser > #sidebar-box[style*="; width: 29"]) #urlbar-container { width: 281px !important; }
 
-/* 300s */
-body:has(#browser > #sidebar-box[style*="; width: 30"]) #urlbar-container { width: 291px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 31"]) #urlbar-container { width: 301px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 32"]) #urlbar-container { width: 311px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 33"]) #urlbar-container { width: 321px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 34"]) #urlbar-container { width: 331px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 35"]) #urlbar-container { width: 341px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 36"]) #urlbar-container { width: 351px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 37"]) #urlbar-container { width: 361px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 38"]) #urlbar-container { width: 371px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 39"]) #urlbar-container { width: 381px !important; }
-
-/* 400s */
-body:has(#browser > #sidebar-box[style*="; width: 40"]) #urlbar-container { width: 391px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 41"]) #urlbar-container { width: 401px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 42"]) #urlbar-container { width: 411px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 43"]) #urlbar-container { width: 421px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 44"]) #urlbar-container { width: 431px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 45"]) #urlbar-container { width: 441px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 46"]) #urlbar-container { width: 451px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 47"]) #urlbar-container { width: 461px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 48"]) #urlbar-container { width: 471px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 49"]) #urlbar-container { width: 481px !important; }
-
-/* 500s */
-body:has(#browser > #sidebar-box[style*="; width: 50"]) #urlbar-container { width: 491px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 51"]) #urlbar-container { width: 501px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 52"]) #urlbar-container { width: 511px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 53"]) #urlbar-container { width: 521px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 54"]) #urlbar-container { width: 531px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 55"]) #urlbar-container { width: 541px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 56"]) #urlbar-container { width: 551px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 57"]) #urlbar-container { width: 561px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 58"]) #urlbar-container { width: 571px !important; }
-body:has(#browser > #sidebar-box[style*="; width: 59"]) #urlbar-container { width: 581px !important; }
-
-/* 600 */
-body:has(#browser > #sidebar-box[style*="; width: 6"]) #urlbar-container { width: 591px !important; }
+/* 300 */
+body:has(#browser > #sidebar-box[style*="; width: 3"]) #urlbar-container { width: 291px !important; }
 
 /* set a minimum width for the url search */
 #urlbar:is([focused][breakout-extend]) {
