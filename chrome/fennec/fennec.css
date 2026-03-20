@@ -166,6 +166,19 @@ gap: space between components, like padding/margin
   --fen-header-btn-dim: 1;
 }
 
+/* platform fonts — use native system font for each OS */
+@media (-moz-platform: windows) {
+  :root, panel, menupopup {
+    font-family: "Segoe UI Variable", system-ui, sans-serif !important;
+  }
+}
+@media (-moz-platform: macos) {
+  :root, panel, menupopup {
+    font-family: "SF Pro", system-ui, sans-serif !important;
+    letter-spacing: -0.15px;
+  }
+}
+
 /* accessibility: disable all animations when OS "reduce motion" is on */
 @media (prefers-reduced-motion: reduce) {
   :root {
