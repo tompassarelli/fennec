@@ -159,9 +159,9 @@ Contributions welcome — especially bug fixes, docs improvements, and focused C
 ## Security
 
 - Extensions are privileged software — install only ones you trust
-- Zen Mode hides browser security indicators like padlock warnings; verify pages before toggling the UI
+- Zen Mode can hide browser security indicators; verify pages before browsing with the UI hidden
 - Review install scripts before piping them into your shell
-- **Use at your own risk** — the author is not liable for any security issues, data breaches, or other damages
+- Fennec is a UI customization, not a security tool — use it with normal caution
 
 ## Status
 
