@@ -49,14 +49,14 @@ irm https://raw.githubusercontent.com/tompassarelli/fennec/main/install.ps1 | ie
 
 **LibreWolf:** add `--librewolf` to either command.
 
-See the [full installation guide](docs/INSTALL.md) for manual install, flags, and details.
+See the [full installation guide](docs/install.md) for manual install, flags, and details.
 
 ## Docs
 
-- [Full installation guide](docs/INSTALL.md)
-- [Nix / Home Manager](docs/NIX.md)
-- [Features & options](docs/FEATURES.md)
-- [Customization](docs/CUSTOMIZATION.md)
+- [Full installation guide](docs/install.md)
+- [Nix / Home Manager](docs/nix.md)
+- [Features & options](docs/features.md)
+- [Customization](docs/customization.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Security
