@@ -24,5 +24,6 @@ Fennec respects your OS "reduce motion" setting — all transitions become insta
 
 ## Recommended Extensions
 
-- **Fennec Update Notifier** (coming soon) - Get notified when a new version of Fennec is available
 - **[Vimium](https://addons.mozilla.org/en-US/firefox/addon/vimium-ff/)** - Keyboard-driven navigation that complements the minimal, distraction-free interface
+
+To get notified about new Fennec releases, [watch the GitHub repository](https://github.com/tompassarelli/fennec) and select "Releases only" under custom notifications.

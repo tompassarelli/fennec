@@ -3,7 +3,7 @@
 
 # Fennec
 
-Minimal, customizable Firefox/LibreWolf setup built with userChrome.css, bringing a Zen-style sidebar workflow to stock Firefox or LibreWolf — no fork, no build.
+Minimal, customizable Firefox/LibreWolf setup built with userChrome.css, bringing a Zen Browser sidebar workflow to stock Firefox or LibreWolf — no fork, no build.
 
 </div>
 
