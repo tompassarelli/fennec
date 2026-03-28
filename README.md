@@ -70,17 +70,6 @@ See the [full installation guide](docs/install.md) for manual install, flags, an
 ## Status
 
 Actively maintained with recent releases and ongoing improvements. If something isn't working, check [open issues](https://github.com/tompassarelli/fennec/issues) or file a new one.
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=tompassarelli%2Ffennec&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=tompassarelli/fennec&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=tompassarelli/fennec&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=tompassarelli/fennec&type=date&legend=top-left" />
- </picture>
-</a>
-
 ## Acknowledgments
 
 Fennec draws inspiration from:
