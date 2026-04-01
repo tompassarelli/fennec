@@ -261,7 +261,7 @@ body:has(#sidebar-box[hidden]) #urlbar {
  * Sidebar must be enabled (not toggled off).
  *
  * mirrors the transitions in #region dynamic drawer toggle, but
- * collapses to 20px (detection zone) instead of 0px, using negative
+ * collapses to 8px (detection zone) instead of 0px, using negative
  * margin to hide the overflow.
  */
 
@@ -269,10 +269,10 @@ body:has(#sidebar-box[hidden]) #urlbar {
   body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
     #sidebar-box:not([hidden]) {
     display: flex !important;
-    width: 20px !important;
-    min-width: 20px !important;
-    max-width: 20px !important;
-    margin-right: -20px !important;
+    width: 8px !important;
+    min-width: 8px !important;
+    max-width: 8px !important;
+    margin-right: -8px !important;
     overflow: hidden !important;
     padding: 0 !important;
     opacity: 0 !important;
