@@ -303,6 +303,11 @@ body:has(#sidebar-box[hidden]) #urlbar {
     width: var(--fen-autohide-width) !important;
   }
 
+  /* urlbar width based on fixed sidebar width, not the style-attr ladder */
+  #urlbar {
+    width: calc(var(--fen-autohide-width) - 9px) !important;
+  }
+
   /* splitter hidden — box-shadow replaces it */
   #sidebar-splitter {
     display: none !important;
