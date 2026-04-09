@@ -9,6 +9,8 @@ To enable:
 2. Set `fennec.drawer.autohide` to `true`
 3. Restart Firefox
 
+> **Linux users:** You may need to set `widget.gtk.ignore-bogus-leave-notify` to `1` in `about:config`. Without this, GTK can send spurious leave events that cause the sidebar to collapse unexpectedly.
+
 ## Floating Urlbar (off by default)
 
 When enabled, the urlbar detaches from the sidebar and floats centered on the viewport when focused — like a spotlight/command palette. A "Searching..." placeholder stays in the sidebar.
