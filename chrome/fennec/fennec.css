@@ -471,7 +471,7 @@ panel#appMenu-popup {
 /* url bar above the sideberry tabs */
 #urlbar-container {
   position: absolute;
-  width: 215px !important;
+  width: 300px !important; /* fallback */
   margin: 0px !important;
   margin-left: var(--fen-gap-x) !important;
   top: var(--fen-urlbar-position-y);
@@ -507,7 +507,23 @@ body:not(:has(#sidebar-main[hidden])) #urlbar-background {
    224 appears to be min-width default for sidebar */
 
 /* selecting style instead of width because width isn't available at start */
+
+/* 100s */
+body:has(#browser > #sidebar-box[style*="; width: 10"]) #urlbar-container { width: 91px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 11"]) #urlbar-container { width: 101px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 12"]) #urlbar-container { width: 111px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 13"]) #urlbar-container { width: 121px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 14"]) #urlbar-container { width: 131px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 15"]) #urlbar-container { width: 141px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 16"]) #urlbar-container { width: 151px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 17"]) #urlbar-container { width: 161px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 18"]) #urlbar-container { width: 171px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 19"]) #urlbar-container { width: 181px !important; }
+
 /* 200s */
+body:has(#browser > #sidebar-box[style*="; width: 20"]) #urlbar-container { width: 191px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 21"]) #urlbar-container { width: 201px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 22"]) #urlbar-container { width: 211px !important; }
 body:has(#browser > #sidebar-box[style*="; width: 22"]) #urlbar-container { width: 211px !important; }
 body:has(#browser > #sidebar-box[style*="; width: 23"]) #urlbar-container { width: 221px !important; }
 body:has(#browser > #sidebar-box[style*="; width: 24"]) #urlbar-container { width: 231px !important; }
@@ -517,8 +533,46 @@ body:has(#browser > #sidebar-box[style*="; width: 27"]) #urlbar-container { widt
 body:has(#browser > #sidebar-box[style*="; width: 28"]) #urlbar-container { width: 271px !important; }
 body:has(#browser > #sidebar-box[style*="; width: 29"]) #urlbar-container { width: 281px !important; }
 
-/* 300 */
-body:has(#browser > #sidebar-box[style*="; width: 3"]) #urlbar-container { width: 291px !important; }
+/* 300s */
+body:has(#browser > #sidebar-box[style*="; width: 30"]) #urlbar-container { width: 291px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 31"]) #urlbar-container { width: 301px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 32"]) #urlbar-container { width: 311px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 33"]) #urlbar-container { width: 321px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 34"]) #urlbar-container { width: 331px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 35"]) #urlbar-container { width: 341px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 36"]) #urlbar-container { width: 351px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 37"]) #urlbar-container { width: 361px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 38"]) #urlbar-container { width: 371px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 39"]) #urlbar-container { width: 381px !important; }
+
+/* 400s */
+body:has(#browser > #sidebar-box[style*="; width: 40"]) #urlbar-container { width: 391px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 41"]) #urlbar-container { width: 401px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 42"]) #urlbar-container { width: 411px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 43"]) #urlbar-container { width: 421px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 44"]) #urlbar-container { width: 431px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 45"]) #urlbar-container { width: 441px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 46"]) #urlbar-container { width: 451px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 47"]) #urlbar-container { width: 461px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 48"]) #urlbar-container { width: 471px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 49"]) #urlbar-container { width: 481px !important; }
+
+/* 500s */
+body:has(#browser > #sidebar-box[style*="; width: 50"]) #urlbar-container { width: 491px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 51"]) #urlbar-container { width: 501px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 52"]) #urlbar-container { width: 511px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 53"]) #urlbar-container { width: 521px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 54"]) #urlbar-container { width: 531px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 55"]) #urlbar-container { width: 541px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 56"]) #urlbar-container { width: 551px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 57"]) #urlbar-container { width: 561px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 58"]) #urlbar-container { width: 571px !important; }
+body:has(#browser > #sidebar-box[style*="; width: 59"]) #urlbar-container { width: 581px !important; }
+
+/* 600 */
+body:has(#browser > #sidebar-box[style*="; width: 600"]) #urlbar-container { width: 591px !important; }
+
+
 
 /* set a minimum width for the url search */
 #urlbar:is([focused][breakout-extend]) {
