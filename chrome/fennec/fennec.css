@@ -157,6 +157,10 @@ gap: space between components, like padding/margin
   /* transition speed — set to 0s by reduced motion */
   --fen-ts-2: 0.2s;
   --fen-ts-3: 0.3s;
+
+  /* autohide collapse delay — bridges the ~120ms gap between :hover
+     clearing and [multiselected] being set at drag-start (bug 1818517) */
+  --fen-autohide-collapse-delay: 0.1s;
 }
 
 /* if a theme is present (like Firefox Color), respect it fully */
@@ -263,10 +267,15 @@ body:has(#sidebar-box[hidden]) #urlbar {
  * mirrors the transitions in #region dynamic drawer toggle, but
  * collapses to 8px (detection zone) instead of 0px, using negative
  * margin to hide the overflow.
+ *
+ * [multiselected] detection: on Linux, :hover is cleared by a
+ * spurious mouseleave at drag-start (Mozilla bug 1818517). Firefox
+ * sets [multiselected] on chrome-side tabbrowser-tab elements during
+ * tab drags (including Sideberry drags), so we gate on that too.
  */
 
 @media -moz-pref("fennec.drawer.autohide") {
-  body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
+  body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
     #sidebar-box:not([hidden]) {
     display: flex !important;
     width: 8px !important;
@@ -278,10 +287,10 @@ body:has(#sidebar-box[hidden]) #urlbar {
     opacity: 0 !important;
     pointer-events: auto !important;
     z-index: 10 !important;
-    transition: width var(--fen-ts-3) ease, max-width var(--fen-ts-3) ease, margin-right var(--fen-ts-3) ease, padding var(--fen-ts-3) step-end, opacity var(--fen-ts-2) ease !important;
+    transition: width var(--fen-ts-3) ease var(--fen-autohide-collapse-delay), max-width var(--fen-ts-3) ease var(--fen-autohide-collapse-delay), margin-right var(--fen-ts-3) ease var(--fen-autohide-collapse-delay), padding var(--fen-ts-3) step-end var(--fen-autohide-collapse-delay), opacity var(--fen-ts-2) ease var(--fen-autohide-collapse-delay) !important;
   }
 
-  body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
+  body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
     #navigator-toolbox {
     width: 0px !important;
     overflow: hidden !important;
@@ -308,12 +317,12 @@ body:has(#sidebar-box[hidden]) #urlbar {
     transition: none !important;
   }
 
-  body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
+  body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
     #identity-icon-box {
     background-color: transparent !important;
   }
 
-  body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
+  body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
     #sidebar-splitter {
     display: none !important;
   }
