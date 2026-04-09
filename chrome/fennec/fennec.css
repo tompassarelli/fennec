@@ -28,7 +28,7 @@ to understand fennec, we fundamentally need to grok firefox chrome
   - sidebar-box
   - sidebar-splitter
   - tabbrowser-tabbox (contains html page content)
-    - note: can never have z-index priority compared to actual chrome
+    - note: can never have z-index priority over chrome
       - mozilla does this for security reasons, the author assumes,
         otherwise users could hide the chrome to confuse users
 
@@ -160,7 +160,10 @@ gap: space between components, like padding/margin
 
   /* autohide collapse delay — bridges the ~120ms gap between :hover
      clearing and [multiselected] being set at drag-start (bug 1818517) */
-  --fen-autohide-collapse-delay: 0.1s;
+  --fen-autohide-collapse-delay: 0.2s;
+
+  /* fixed sidebar width for autohide overlay mode */
+  --fen-autohide-width: 300px;
 }
 
 /* if a theme is present (like Firefox Color), respect it fully */
@@ -275,19 +278,48 @@ body:has(#sidebar-box[hidden]) #urlbar {
  */
 
 @media -moz-pref("fennec.drawer.autohide") {
+  /* overlay: sidebar out of flow at z-index 1 (Firefox default).
+     content lowered to z-index 0 so sidebar overlays it.
+     header stays at z-index 2 — above sidebar, below content edge.
+     navigator-toolbox width matches fixed sidebar width — no spill. */
+  #sidebar-box:not([hidden]) {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    height: 100vh !important;
+    width: var(--fen-autohide-width) !important;
+    max-width: var(--fen-autohide-width) !important;
+    z-index: var(--browser-area-z-index-sidebar) !important;
+    box-shadow: var(--fen-sidebar-splitter-width) 0 0 0 var(--fen-color) !important;
+  }
+
+  /* lower content so sidebar (z-index:1) overlays it */
+  #tabbrowser-tabbox {
+    z-index: 0 !important;
+  }
+
+  /* match navigator-toolbox to fixed sidebar width */
+  body #navigator-toolbox {
+    width: var(--fen-autohide-width) !important;
+  }
+
+  /* splitter hidden — box-shadow replaces it */
+  #sidebar-splitter {
+    display: none !important;
+  }
+
+  /* collapsed state */
   body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
     #sidebar-box:not([hidden]) {
     display: flex !important;
     width: 8px !important;
     min-width: 8px !important;
     max-width: 8px !important;
-    margin-right: -8px !important;
     overflow: hidden !important;
     padding: 0 !important;
     opacity: 0 !important;
     pointer-events: auto !important;
-    z-index: 10 !important;
-    transition: width var(--fen-ts-3) ease var(--fen-autohide-collapse-delay), max-width var(--fen-ts-3) ease var(--fen-autohide-collapse-delay), margin-right var(--fen-ts-3) ease var(--fen-autohide-collapse-delay), padding var(--fen-ts-3) step-end var(--fen-autohide-collapse-delay), opacity var(--fen-ts-2) ease var(--fen-autohide-collapse-delay) !important;
+    transition: width var(--fen-ts-3) ease var(--fen-autohide-collapse-delay), max-width var(--fen-ts-3) ease var(--fen-autohide-collapse-delay), padding var(--fen-ts-3) step-end var(--fen-autohide-collapse-delay), opacity var(--fen-ts-2) ease var(--fen-autohide-collapse-delay) !important;
   }
 
   body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
@@ -320,11 +352,6 @@ body:has(#sidebar-box[hidden]) #urlbar {
   body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
     #identity-icon-box {
     background-color: transparent !important;
-  }
-
-  body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
-    #sidebar-splitter {
-    display: none !important;
   }
 }
 
@@ -422,7 +449,12 @@ body:not(:has(#sidebar-main[hidden])) #back-button {
 /* currently serves no purpose to fennec */
 #customizableui-special-spring2 {
   display: none;
-} 
+}
+
+/* overflow menu — hidden, toolbar items fit within sidebar width */
+#nav-bar-overflow-button {
+  display: none;
+}
 
 /* #downloads-button {} */
 
