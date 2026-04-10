@@ -11,6 +11,17 @@ To enable:
 
 > **Linux users:** You may need to set `widget.gtk.ignore-bogus-leave-notify` to `1` in `about:config`. Without this, GTK can send spurious leave events that cause the sidebar to collapse unexpectedly.
 
+### Require Focus (off by default)
+
+By default, the sidebar collapses whenever the mouse leaves it — including when the mouse leaves the Firefox window entirely. With `fennec.drawer.autohide.requireFocus` enabled, the sidebar only collapses when the mouse is inside the Firefox window. This keeps the sidebar visible when you switch to another app or move between tiled windows.
+
+> **Note:** In tiling setups where you navigate between windows with the mouse, the sidebar may briefly expand as your cursor crosses the Firefox viewport. Keyboard-driven window switching (e.g. hotkeys) is unaffected.
+
+To enable:
+1. Go to `about:config` in the address bar
+2. Set `fennec.drawer.autohide.requireFocus` to `true`
+3. Restart Firefox
+
 ## Floating Urlbar (off by default)
 
 When enabled, the urlbar detaches from the sidebar and floats centered on the viewport when focused — like a spotlight/command palette. A "Searching..." placeholder stays in the sidebar.
