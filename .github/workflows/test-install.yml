@@ -51,6 +51,13 @@ jobs:
           grep -q 'sidebar.position_start' "$profile/user.js" || { echo "FAIL: sidebar.position_start pref missing"; exit 1; }
           grep -q 'pfx.drawer.autohide' "$profile/user.js" || { echo "FAIL: pfx.drawer.autohide pref missing"; exit 1; }
 
+          # fx-autoconfig loader
+          test -d "$profile/chrome/utils" || { echo "FAIL: utils/ missing"; exit 1; }
+          test -f "$profile/chrome/utils/boot.sys.mjs" || { echo "FAIL: boot.sys.mjs missing"; exit 1; }
+          test -f "$profile/chrome/utils/chrome.manifest" || { echo "FAIL: chrome.manifest missing"; exit 1; }
+          test -d "$profile/chrome/JS" || { echo "FAIL: JS/ missing"; exit 1; }
+          test -f "$profile/chrome/JS/palefox-hello.uc.js" || { echo "FAIL: palefox-hello.uc.js missing"; exit 1; }
+
           echo "--- chrome/ contents ---"
           ls -laR "$profile/chrome/"
           echo "--- user.js ---"

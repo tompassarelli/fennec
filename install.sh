@@ -181,6 +181,8 @@ fi
 # Install files
 echo "Installing palefox..."
 mkdir -p "$chrome_dir"
+mkdir -p "$chrome_dir/utils"
+mkdir -p "$chrome_dir/JS"
 
 # Core files — always overwrite
 for file in palefox.css; do
@@ -188,6 +190,11 @@ for file in palefox.css; do
         cp "$extracted/$file" "$chrome_dir/$file"
     fi
 done
+
+# fx-autoconfig loader — always overwrite
+if [ -d "$extracted/utils" ]; then
+    cp "$extracted/utils/"* "$chrome_dir/utils/"
+fi
 
 # User files — preserve if present, create if missing
 for file in userChrome.css user.css; do
@@ -199,6 +206,47 @@ for file in userChrome.css user.css; do
         fi
     fi
 done
+
+# Install fx-autoconfig to Firefox application directory
+if [ -n "${PALEFOX_LOCAL:-}" ]; then
+    program_source="$PALEFOX_LOCAL/program"
+else
+    program_source="$(dirname "$extracted")/program"
+fi
+
+if [ -d "$program_source" ]; then
+    # Locate Firefox install directory
+    case "$(uname -s)" in
+        Darwin)
+            if [ "$BROWSER_NAME" = "LibreWolf" ]; then
+                app_dir="/Applications/LibreWolf.app/Contents/Resources"
+            else
+                app_dir="/Applications/Firefox.app/Contents/Resources"
+            fi
+            ;;
+        Linux)
+            app_dir="$(dirname "$(readlink -f "$(which "$BROWSER_PROCESS" 2>/dev/null)")" 2>/dev/null)"
+            ;;
+    esac
+
+    if [ -n "${app_dir:-}" ] && [ -d "$app_dir" ]; then
+        echo "Installing fx-autoconfig loader to $app_dir..."
+        if [ -w "$app_dir" ]; then
+            cp "$program_source/config.js" "$app_dir/config.js"
+            mkdir -p "$app_dir/defaults/pref"
+            cp "$program_source/defaults/pref/config-prefs.js" "$app_dir/defaults/pref/config-prefs.js"
+        else
+            echo "Elevated privileges required to install loader to $app_dir"
+            sudo cp "$program_source/config.js" "$app_dir/config.js"
+            sudo mkdir -p "$app_dir/defaults/pref"
+            sudo cp "$program_source/defaults/pref/config-prefs.js" "$app_dir/defaults/pref/config-prefs.js"
+        fi
+    else
+        echo "Warning: Could not locate $BROWSER_NAME install directory."
+        echo "Manually copy program/config.js and program/defaults/pref/config-prefs.js"
+        echo "to your $BROWSER_NAME application directory for JavaScript support."
+    fi
+fi
 
 # Print legacy migration notice
 if [ "$LEGACY_MIGRATED" = true ]; then

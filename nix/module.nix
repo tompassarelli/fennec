@@ -38,6 +38,16 @@ in
       description = "Firefox profile name to install Palefox into.";
     };
 
+    jsLoader = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Enable fx-autoconfig JavaScript loader. Deploys profile-side files
+        automatically. The install-dir files (config.js, config-prefs.js)
+        must be set up separately — see docs/install.md for NixOS instructions.
+      '';
+    };
+
     autohide = lib.mkOption {
       type = lib.types.bool;
       default = false;
@@ -99,6 +109,16 @@ in
 
     home.file."${chromeDir}/user.css" = {
       text = userCssContent;
+    };
+
+    # fx-autoconfig loader (profile side)
+    home.file."${chromeDir}/utils" = lib.mkIf cfg.jsLoader {
+      source = "${flakeSelf}/chrome/utils";
+      recursive = true;
+    };
+
+    home.file."${chromeDir}/JS/.gitkeep" = lib.mkIf cfg.jsLoader {
+      text = "";
     };
   };
 }

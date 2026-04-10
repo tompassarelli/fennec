@@ -156,6 +156,14 @@ try {
     if (-not (Test-Path $chromeDir)) {
         New-Item -ItemType Directory -Path $chromeDir | Out-Null
     }
+    $utilsDir = Join-Path $chromeDir "utils"
+    if (-not (Test-Path $utilsDir)) {
+        New-Item -ItemType Directory -Path $utilsDir | Out-Null
+    }
+    $jsDir = Join-Path $chromeDir "JS"
+    if (-not (Test-Path $jsDir)) {
+        New-Item -ItemType Directory -Path $jsDir | Out-Null
+    }
 
     # Core files — always overwrite
     foreach ($file in @("palefox.css")) {
@@ -164,6 +172,12 @@ try {
         if (Test-Path $source) {
             Copy-Item -Path $source -Destination $dest -Force
         }
+    }
+
+    # fx-autoconfig loader — always overwrite
+    $utilsSource = Join-Path $chromeSource "utils"
+    if (Test-Path $utilsSource) {
+        Copy-Item -Path (Join-Path $utilsSource "*") -Destination $utilsDir -Force
     }
 
     # User files — preserve if present, create if missing
@@ -176,6 +190,52 @@ try {
             } else {
                 Write-Host "Preserved: $file"
             }
+        }
+    }
+
+    # Install fx-autoconfig to Firefox application directory
+    if ($env:PALEFOX_LOCAL) {
+        $programSource = Join-Path $env:PALEFOX_LOCAL "program"
+    } else {
+        $programSource = Join-Path (Split-Path $chromeSource) "program"
+    }
+
+    if (Test-Path $programSource) {
+        # Locate Firefox install directory
+        if ($browserName -eq "LibreWolf") {
+            $appDir = (Get-ItemProperty "HKLM:\SOFTWARE\LibreWolf" -ErrorAction SilentlyContinue).InstallDirectory
+            if (-not $appDir) {
+                $appDir = "${env:ProgramFiles}\LibreWolf"
+            }
+        } else {
+            $appDir = (Get-ItemProperty "HKLM:\SOFTWARE\Mozilla\Mozilla Firefox" -ErrorAction SilentlyContinue).InstallDirectory
+            if (-not $appDir) {
+                $appDir = "${env:ProgramFiles}\Mozilla Firefox"
+            }
+        }
+
+        if (Test-Path $appDir) {
+            Write-Host "Installing fx-autoconfig loader to $appDir..."
+            try {
+                Copy-Item -Path (Join-Path $programSource "config.js") -Destination (Join-Path $appDir "config.js") -Force
+                $prefDir = Join-Path $appDir "defaults\pref"
+                if (-not (Test-Path $prefDir)) {
+                    New-Item -ItemType Directory -Path $prefDir | Out-Null
+                }
+                Copy-Item -Path (Join-Path $programSource "defaults\pref\config-prefs.js") -Destination (Join-Path $prefDir "config-prefs.js") -Force
+            } catch {
+                Write-Host "Elevated privileges may be required. Retrying..."
+                Start-Process powershell -Verb RunAs -Wait -ArgumentList @(
+                    "-Command",
+                    "Copy-Item '$(Join-Path $programSource "config.js")' '$(Join-Path $appDir "config.js")' -Force; " +
+                    "New-Item -ItemType Directory -Path '$(Join-Path $appDir "defaults\pref")' -Force | Out-Null; " +
+                    "Copy-Item '$(Join-Path $programSource "defaults\pref\config-prefs.js")' '$(Join-Path $appDir "defaults\pref\config-prefs.js")' -Force"
+                )
+            }
+        } else {
+            Write-Host "Warning: Could not locate $browserName install directory at $appDir"
+            Write-Host "Manually copy program\config.js and program\defaults\pref\config-prefs.js"
+            Write-Host "to your $browserName application directory for JavaScript support."
         }
     }
 
