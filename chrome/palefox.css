@@ -164,6 +164,11 @@ gap: space between components, like padding/margin
 
   /* fixed sidebar width for autohide overlay mode */
   --pfx-autohide-width: 300px;
+
+  /* width of the invisible hover strip that triggers sidebar expand
+     default: 8px — override via about:config boolean ladder:
+     pfx.drawer.autohide.expandTriggerWidth.{6px,10px,12px,14px} */
+  --pfx-autohide-expand-trigger-width: 8px;
 }
 
 /* if a theme is present (like Firefox Color), respect it fully */
@@ -268,7 +273,8 @@ body:has(#sidebar-box[hidden]) #urlbar {
  * Sidebar must be enabled (not toggled off).
  *
  * mirrors the transitions in #region dynamic drawer toggle, but
- * collapses to 8px (detection zone) instead of 0px, using negative
+ * collapses to --pfx-autohide-expand-trigger-width (detection zone)
+ * instead of 0px, using negative
  * margin to hide the overflow.
  *
  * [multiselected] detection: on Linux, :hover is cleared by a
@@ -276,6 +282,19 @@ body:has(#sidebar-box[hidden]) #urlbar {
  * sets [multiselected] on chrome-side tabbrowser-tab elements during
  * tab drags (including Sidebery drags), so we gate on that too.
  */
+
+@media -moz-pref("pfx.drawer.autohide.expandTriggerWidth.6px") {
+  :root { --pfx-autohide-expand-trigger-width: 6px; }
+}
+@media -moz-pref("pfx.drawer.autohide.expandTriggerWidth.10px") {
+  :root { --pfx-autohide-expand-trigger-width: 10px; }
+}
+@media -moz-pref("pfx.drawer.autohide.expandTriggerWidth.12px") {
+  :root { --pfx-autohide-expand-trigger-width: 12px; }
+}
+@media -moz-pref("pfx.drawer.autohide.expandTriggerWidth.14px") {
+  :root { --pfx-autohide-expand-trigger-width: 14px; }
+}
 
 @media -moz-pref("pfx.drawer.autohide") {
   /* overlay: sidebar out of flow at z-index 1 (Firefox default).
@@ -318,9 +337,9 @@ body:has(#sidebar-box[hidden]) #urlbar {
     body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
       #sidebar-box:not([hidden]) {
       display: flex !important;
-      width: 10px !important;
-      min-width: 10px !important;
-      max-width: 10px !important;
+      width: var(--pfx-autohide-expand-trigger-width) !important;
+      min-width: var(--pfx-autohide-expand-trigger-width) !important;
+      max-width: var(--pfx-autohide-expand-trigger-width) !important;
       overflow: hidden !important;
       padding: 0 !important;
       opacity: 0 !important;
@@ -361,9 +380,9 @@ body:has(#sidebar-box[hidden]) #urlbar {
     body:hover:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
       #sidebar-box:not([hidden]) {
       display: flex !important;
-      width: 10px !important;
-      min-width: 10px !important;
-      max-width: 10px !important;
+      width: var(--pfx-autohide-expand-trigger-width) !important;
+      min-width: var(--pfx-autohide-expand-trigger-width) !important;
+      max-width: var(--pfx-autohide-expand-trigger-width) !important;
       overflow: hidden !important;
       padding: 0 !important;
       opacity: 0 !important;
