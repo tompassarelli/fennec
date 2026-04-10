@@ -354,6 +354,47 @@ body:has(#sidebar-box[hidden]) #urlbar {
     background-color: transparent !important;
   }
 
+  /* prevent collapse while a toolbar menu is open.
+     repeats the collapse selector chain + adds :has(menu open) for higher specificity. */
+  body:has(toolbarbutton[open="true"]):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
+    #sidebar-box:not([hidden]) {
+    width: var(--fen-autohide-width) !important;
+    min-width: 0 !important;
+    max-width: var(--fen-autohide-width) !important;
+    overflow: visible !important;
+    padding-left: var(--fen-gap-x) !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transition: none !important;
+  }
+
+  body:has(toolbarbutton[open="true"]):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
+    #navigator-toolbox {
+    width: var(--fen-autohide-width) !important;
+    overflow: visible !important;
+    pointer-events: auto;
+    opacity: 1 !important;
+    transition: none !important;
+  }
+
+  body:has(toolbarbutton[open="true"]):not(:has(#urlbar:is([focused][breakout-extend]))):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
+    toolbaritem#urlbar-container {
+    width: calc(var(--fen-autohide-width) - 9px) !important;
+    max-width: calc(var(--fen-autohide-width) - 9px) !important;
+    pointer-events: auto;
+  }
+
+  body:has(toolbarbutton[open="true"]):not(:has(#urlbar:is([focused][breakout-extend]))):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
+    #urlbar {
+    opacity: 1 !important;
+    transition: none !important;
+  }
+
+  body:has(toolbarbutton[open="true"]):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
+    #identity-icon-box {
+    background-color: initial !important;
+  }
+
   /* require-focus: undo collapse when mouse is outside window.
      body:not(:hover) adds specificity, beating the collapse selectors above. */
   @media -moz-pref("fennec.drawer.autohide.requireFocus") {
