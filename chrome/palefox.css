@@ -167,7 +167,7 @@ gap: space between components, like padding/margin
 
   /* width of the invisible hover strip that triggers sidebar expand
      default: 8px — override via about:config boolean ladder:
-     pfx.drawer.autohide.expandTriggerWidth.{6px,10px,12px,14px} */
+     pfx.drawer.autohide.expandTriggerWidth.{2px,4px,6px,10px} */
   --pfx-autohide-expand-trigger-width: 8px;
 }
 
@@ -283,17 +283,17 @@ body:has(#sidebar-box[hidden]) #urlbar {
  * tab drags (including Sidebery drags), so we gate on that too.
  */
 
+@media -moz-pref("pfx.drawer.autohide.expandTriggerWidth.2px") {
+  :root { --pfx-autohide-expand-trigger-width: 2px; }
+}
+@media -moz-pref("pfx.drawer.autohide.expandTriggerWidth.4px") {
+  :root { --pfx-autohide-expand-trigger-width: 4px; }
+}
 @media -moz-pref("pfx.drawer.autohide.expandTriggerWidth.6px") {
   :root { --pfx-autohide-expand-trigger-width: 6px; }
 }
 @media -moz-pref("pfx.drawer.autohide.expandTriggerWidth.10px") {
   :root { --pfx-autohide-expand-trigger-width: 10px; }
-}
-@media -moz-pref("pfx.drawer.autohide.expandTriggerWidth.12px") {
-  :root { --pfx-autohide-expand-trigger-width: 12px; }
-}
-@media -moz-pref("pfx.drawer.autohide.expandTriggerWidth.14px") {
-  :root { --pfx-autohide-expand-trigger-width: 14px; }
 }
 
 @media -moz-pref("pfx.drawer.autohide") {
