@@ -313,45 +313,90 @@ body:has(#sidebar-box[hidden]) #urlbar {
     display: none !important;
   }
 
-  /* collapsed state */
-  body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
-    #sidebar-box:not([hidden]) {
-    display: flex !important;
-    width: 10px !important;
-    min-width: 10px !important;
-    max-width: 10px !important;
-    overflow: hidden !important;
-    padding: 0 !important;
-    opacity: 0 !important;
-    pointer-events: auto !important;
-    transition: width var(--pfx-ts-3) ease var(--pfx-autohide-collapse-delay), max-width var(--pfx-ts-3) ease var(--pfx-autohide-collapse-delay), padding var(--pfx-ts-3) step-end var(--pfx-autohide-collapse-delay), opacity var(--pfx-ts-2) ease var(--pfx-autohide-collapse-delay) !important;
+  /* collapsed state (default — collapses regardless of window focus) */
+  @media not -moz-pref("pfx.drawer.autohide.requireFocus") {
+    body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
+      #sidebar-box:not([hidden]) {
+      display: flex !important;
+      width: 10px !important;
+      min-width: 10px !important;
+      max-width: 10px !important;
+      overflow: hidden !important;
+      padding: 0 !important;
+      opacity: 0 !important;
+      pointer-events: auto !important;
+      transition: width var(--pfx-ts-3) ease var(--pfx-autohide-collapse-delay), max-width var(--pfx-ts-3) ease var(--pfx-autohide-collapse-delay), padding var(--pfx-ts-3) step-end var(--pfx-autohide-collapse-delay), opacity var(--pfx-ts-2) ease var(--pfx-autohide-collapse-delay) !important;
+    }
+
+    body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
+      #navigator-toolbox {
+      width: 0px !important;
+      overflow: hidden !important;
+      pointer-events: none;
+      opacity: 0 !important;
+      transition: width var(--pfx-ts-3) ease, opacity var(--pfx-ts-2) ease !important;
+    }
+
+    body:not(:has(#urlbar:is([focused][breakout-extend]))):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
+      toolbaritem#urlbar-container {
+      width: 0px !important;
+      max-width: 0px !important;
+      pointer-events: none;
+    }
+
+    body:not(:has(#urlbar:is([focused][breakout-extend]))):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
+      #urlbar {
+      opacity: 0 !important;
+      transition: opacity var(--pfx-ts-2) ease !important;
+    }
+
+    body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
+      #identity-icon-box {
+      background-color: transparent !important;
+    }
   }
 
-  body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
-    #navigator-toolbox {
-    width: 0px !important;
-    overflow: hidden !important;
-    pointer-events: none;
-    opacity: 0 !important;
-    transition: width var(--pfx-ts-3) ease, opacity var(--pfx-ts-2) ease !important;
-  }
+  /* collapsed state (requireFocus — only collapses when mouse is inside window) */
+  @media -moz-pref("pfx.drawer.autohide.requireFocus") {
+    body:hover:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
+      #sidebar-box:not([hidden]) {
+      display: flex !important;
+      width: 10px !important;
+      min-width: 10px !important;
+      max-width: 10px !important;
+      overflow: hidden !important;
+      padding: 0 !important;
+      opacity: 0 !important;
+      pointer-events: auto !important;
+      transition: width var(--pfx-ts-3) ease var(--pfx-autohide-collapse-delay), max-width var(--pfx-ts-3) ease var(--pfx-autohide-collapse-delay), padding var(--pfx-ts-3) step-end var(--pfx-autohide-collapse-delay), opacity var(--pfx-ts-2) ease var(--pfx-autohide-collapse-delay) !important;
+    }
 
-  body:not(:has(#urlbar:is([focused][breakout-extend]))):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
-    toolbaritem#urlbar-container {
-    width: 0px !important;
-    max-width: 0px !important;
-    pointer-events: none;
-  }
+    body:hover:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
+      #navigator-toolbox {
+      width: 0px !important;
+      overflow: hidden !important;
+      pointer-events: none;
+      opacity: 0 !important;
+      transition: width var(--pfx-ts-3) ease, opacity var(--pfx-ts-2) ease !important;
+    }
 
-  body:not(:has(#urlbar:is([focused][breakout-extend]))):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
-    #urlbar {
-    opacity: 0 !important;
-    transition: opacity var(--pfx-ts-2) ease !important;
-  }
+    body:hover:not(:has(#urlbar:is([focused][breakout-extend]))):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
+      toolbaritem#urlbar-container {
+      width: 0px !important;
+      max-width: 0px !important;
+      pointer-events: none;
+    }
 
-  body:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
-    #identity-icon-box {
-    background-color: transparent !important;
+    body:hover:not(:has(#urlbar:is([focused][breakout-extend]))):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
+      #urlbar {
+      opacity: 0 !important;
+      transition: opacity var(--pfx-ts-2) ease !important;
+    }
+
+    body:hover:not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
+      #identity-icon-box {
+      background-color: transparent !important;
+    }
   }
 
   /* prevent collapse while a toolbar menu is open.
@@ -393,48 +438,6 @@ body:has(#sidebar-box[hidden]) #urlbar {
   body:has(toolbarbutton[open="true"]):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
     #identity-icon-box {
     background-color: initial !important;
-  }
-
-  /* require-focus: undo collapse when mouse is outside window.
-     body:not(:hover) adds specificity, beating the collapse selectors above. */
-  @media -moz-pref("pfx.drawer.autohide.requireFocus") {
-    body:not(:hover):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
-      #sidebar-box:not([hidden]) {
-      width: var(--pfx-autohide-width) !important;
-      min-width: 0 !important;
-      max-width: var(--pfx-autohide-width) !important;
-      overflow: visible !important;
-      padding-left: var(--pfx-gap-x) !important;
-      opacity: 1 !important;
-      transition: none !important;
-    }
-
-    body:not(:hover):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
-      #navigator-toolbox {
-      width: var(--pfx-autohide-width) !important;
-      overflow: visible !important;
-      pointer-events: auto;
-      opacity: 1 !important;
-      transition: none !important;
-    }
-
-    body:not(:hover):not(:has(#urlbar:is([focused][breakout-extend]))):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
-      toolbaritem#urlbar-container {
-      width: calc(var(--pfx-autohide-width) - 9px) !important;
-      max-width: calc(var(--pfx-autohide-width) - 9px) !important;
-      pointer-events: auto;
-    }
-
-    body:not(:hover):not(:has(#urlbar:is([focused][breakout-extend]))):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
-      #urlbar {
-      opacity: 1 !important;
-      transition: none !important;
-    }
-
-    body:not(:hover):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected]))
-      #identity-icon-box {
-      background-color: initial !important;
-    }
   }
 
   /* skip the opacity transition when urlbar gains focus during autohide */
