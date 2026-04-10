@@ -1,16 +1,16 @@
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/7ebd8f20-2846-4e0e-9d9f-de563a589805" alt="Fennec logo" width="96" />
+  <img src="https://github.com/user-attachments/assets/7ebd8f20-2846-4e0e-9d9f-de563a589805" alt="Palefox logo" width="96" />
 
-# Fennec
+# Palefox
 
 Minimal, customizable Firefox/LibreWolf setup built with userChrome.css, bringing a Zen Browser sidebar workflow to stock Firefox or LibreWolf — no fork, no build.
 
 </div>
 
 <p align="center"><strong>Default</strong></p>
-<p align="center"><img src="https://github.com/user-attachments/assets/9fc9691d-8e5e-4864-bdd8-0aa696955d86" alt="Fennec default view" /></p>
+<p align="center"><img src="https://github.com/user-attachments/assets/9fc9691d-8e5e-4864-bdd8-0aa696955d86" alt="Palefox default view" /></p>
 <p align="center"><strong>Zen Mode</strong></p>
-<p align="center"><img src="https://github.com/user-attachments/assets/7db86916-8c1c-4feb-91de-0f62d5fab209" alt="Fennec zen mode" /></p>
+<p align="center"><img src="https://github.com/user-attachments/assets/7db86916-8c1c-4feb-91de-0f62d5fab209" alt="Palefox zen mode" /></p>
 
 ## Features
 
@@ -24,12 +24,12 @@ Minimal, customizable Firefox/LibreWolf setup built with userChrome.css, bringin
 
 🎨 **Theme Support** - System themes (light/dark) and user-created Firefox themes supported
 
-## Why Fennec?
+## Why Palefox?
 
-Fennec is for people who want the Zen-style sidebar workflow while staying on stock Firefox or LibreWolf.
+Palefox is for people who want the Zen-style sidebar workflow while staying on stock Firefox or LibreWolf.
 
 - No browser fork — just CSS
-- Update-safe customizations — your tweaks survive Fennec updates
+- Update-safe customizations — your tweaks survive Palefox updates
 - Works on Firefox and LibreWolf
 
 ## Quick Install
@@ -40,12 +40,12 @@ Install [Sideberry](https://addons.mozilla.org/en-US/firefox/addon/sidebery/), t
 
 **macOS / Linux:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tompassarelli/fennec/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/tompassarelli/palefox/main/install.sh | bash
 ```
 
 **Windows** (PowerShell):
 ```powershell
-irm https://raw.githubusercontent.com/tompassarelli/fennec/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/tompassarelli/palefox/main/install.ps1 | iex
 ```
 
 **LibreWolf:** add `--librewolf` to either command.
@@ -65,14 +65,14 @@ See the [full installation guide](docs/install.md) for manual install, flags, an
 - Extensions are privileged software — install only ones you trust
 - Zen Mode can hide browser security indicators; verify pages before browsing with the UI hidden
 - Review install scripts before piping them into your shell
-- Fennec is a UI customization, not a security tool — use it with normal caution
+- Palefox is a UI customization, not a security tool — use it with normal caution
 
 ## Status
 
-Actively maintained with recent releases and ongoing improvements. If something isn't working, check [open issues](https://github.com/tompassarelli/fennec/issues) or file a new one.
+Actively maintained with recent releases and ongoing improvements. If something isn't working, check [open issues](https://github.com/tompassarelli/palefox/issues) or file a new one.
 ## Acknowledgments
 
-Fennec draws inspiration from:
+Palefox draws inspiration from:
 
 - [Zen Browser](https://zen-browser.app/) — sidebar design
 - [GWfox](https://github.com/akkva/gwfox) — CSS theming techniques

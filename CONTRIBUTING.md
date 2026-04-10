@@ -1,8 +1,8 @@
-# Contributing to Fennec
+# Contributing to Palefox
 
 Thanks for your interest in contributing.
 
-Fennec is a lean, CSS-first project. Contributions are welcome, but changes should preserve that scope and keep things simple.
+Palefox is a lean, CSS-first project. Contributions are welcome, but changes should preserve that scope and keep things simple.
 
 ## Good contributions
 
@@ -19,8 +19,8 @@ If the change is substantial or adds a new feature, please open an issue first. 
 ## Guidelines
 
 - Keep PRs focused and small
-- Preserve the modular structure under `chrome/fennec/` and `chrome/user/`
-- Don't break update-safe customization (`chrome/user/` must survive reinstalls)
+- Preserve the modular structure under `chrome/` and `chrome/`
+- Don't break update-safe customization (`chrome/` must survive reinstalls)
 - Avoid unnecessary complexity
 - Match existing naming and branding conventions
 

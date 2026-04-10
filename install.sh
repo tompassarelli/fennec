@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="tompassarelli/fennec"
+REPO="tompassarelli/palefox"
 LATEST_URL="https://api.github.com/repos/$REPO/releases/latest"
 
 FORCE=false
@@ -20,7 +20,7 @@ if [ "$USE_LIBREWOLF" = true ]; then
     BROWSER_NAME="LibreWolf"
     BROWSER_PROCESS="librewolf"
     PROFILE_PATTERN="*.default-default"
-elif [ -z "${FENNEC_LOCAL:-}" ] && [ -t 0 ]; then
+elif [ -z "${PALEFOX_LOCAL:-}" ] && [ -t 0 ]; then
     echo "Select browser:"
     echo "  1) Firefox (default)"
     echo "  2) LibreWolf"
@@ -45,7 +45,7 @@ cleanup() { if [ -n "$tmp_dir" ]; then rm -rf "$tmp_dir"; fi; }
 trap cleanup EXIT
 
 # Check if browser is running (skip in CI)
-if [ -z "${FENNEC_LOCAL:-}" ]; then
+if [ -z "${PALEFOX_LOCAL:-}" ]; then
     if pgrep -x "$BROWSER_PROCESS" >/dev/null 2>&1; then
         echo "$BROWSER_NAME is currently running. Please close it before continuing."
         read -rp "Press Enter to continue after closing $BROWSER_NAME..."
@@ -123,9 +123,9 @@ echo "Using profile: $(basename "$profile")"
 chrome_dir="$profile/chrome"
 
 # Locate chrome source files
-if [ -n "${FENNEC_LOCAL:-}" ]; then
+if [ -n "${PALEFOX_LOCAL:-}" ]; then
     # Use local checkout instead of downloading
-    extracted="$FENNEC_LOCAL/chrome"
+    extracted="$PALEFOX_LOCAL/chrome"
     if [ ! -d "$extracted" ]; then
         echo "Error: chrome folder not found at $extracted"
         exit 1
@@ -142,15 +142,15 @@ else
         exit 1
     fi
 
-    echo "Downloading Fennec $tag..."
+    echo "Downloading Palefox $tag..."
     archive_url="https://github.com/$REPO/archive/refs/tags/$tag.tar.gz"
     if ! curl -fsSL "$archive_url" | tar -xz -C "$tmp_dir"; then
         echo "Error: Failed to download release archive. Check your internet connection."
         exit 1
     fi
 
-    # The archive extracts to fennec-<tag> (with leading 'v' stripped by GitHub)
-    extracted="$(ls -d "$tmp_dir"/fennec-*/chrome 2>/dev/null | head -1)"
+    # The archive extracts to palefox-<tag> (with leading 'v' stripped by GitHub)
+    extracted="$(ls -d "$tmp_dir"/palefox-*/chrome 2>/dev/null | head -1)"
     if [ -z "$extracted" ] || [ ! -d "$extracted" ]; then
         echo "Error: chrome folder not found in downloaded archive."
         exit 1
@@ -171,7 +171,7 @@ fi
 # Positive detection — these markers only exist in the old inline format
 LEGACY_MIGRATED=false
 if [ -f "$chrome_dir/userChrome.css" ]; then
-    if grep -q '#region dev-docs' "$chrome_dir/userChrome.css" && grep -q -- '--fen-' "$chrome_dir/userChrome.css"; then
+    if grep -q '#region dev-docs' "$chrome_dir/userChrome.css" && grep -q -- '--pfx-' "$chrome_dir/userChrome.css"; then
         cp "$chrome_dir/userChrome.css" "$chrome_dir/userChrome.css.legacy"
         rm "$chrome_dir/userChrome.css"
         LEGACY_MIGRATED=true
@@ -179,18 +179,18 @@ if [ -f "$chrome_dir/userChrome.css" ]; then
 fi
 
 # Install files
-echo "Installing fennec..."
-mkdir -p "$chrome_dir/fennec" "$chrome_dir/user"
+echo "Installing palefox..."
+mkdir -p "$chrome_dir"
 
 # Core files — always overwrite
-for file in fennec/fennec.css; do
+for file in palefox.css; do
     if [ -f "$extracted/$file" ]; then
         cp "$extracted/$file" "$chrome_dir/$file"
     fi
 done
 
 # User files — preserve if present, create if missing
-for file in userChrome.css user/user.css; do
+for file in userChrome.css user.css; do
     if [ -f "$extracted/$file" ]; then
         if [ ! -f "$chrome_dir/$file" ] || [ "$FORCE" = true ]; then
             cp "$extracted/$file" "$chrome_dir/$file"
@@ -205,7 +205,7 @@ if [ "$LEGACY_MIGRATED" = true ]; then
     echo ""
     echo "Note: Your previous userChrome.css used the legacy monolithic layout."
     echo "It has been backed up to: chrome/userChrome.css.legacy"
-    echo "Move any personal tweaks from that file into chrome/user/user.css"
+    echo "Move any personal tweaks from that file into chrome/user.css"
 fi
 
 # Configure browser preferences in user.js
@@ -224,9 +224,9 @@ set_pref "toolkit.legacyUserProfileCustomizations.stylesheets" "true"
 set_pref "sidebar.verticalTabs" "false"
 set_pref "sidebar.revamp" "false"
 set_pref "sidebar.position_start" "true"
-set_pref "fennec.drawer.autohide" "false"
-set_pref "fennec.drawer.autohide.requireFocus" "true"
-set_pref "fennec.urlbar.float" "false"
+set_pref "pfx.drawer.autohide" "false"
+set_pref "pfx.drawer.autohide.requireFocus" "true"
+set_pref "pfx.urlbar.float" "false"
 
 # GTK may send spurious leave events that break autohide
 if [ "$(uname -s)" = "Linux" ]; then

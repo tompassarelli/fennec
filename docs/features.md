@@ -6,7 +6,7 @@ Sidebar must be enabled (not toggled off). When enabled, the drawer auto-collaps
 
 To enable:
 1. Go to `about:config` in the address bar
-2. Set `fennec.drawer.autohide` to `true`
+2. Set `pfx.drawer.autohide` to `true`
 3. Restart Firefox
 
 > **Linux users:** You may need to set `widget.gtk.ignore-bogus-leave-notify` to `1` in `about:config`. Without this, GTK can send spurious leave events that cause the sidebar to collapse unexpectedly.
@@ -15,11 +15,11 @@ To enable:
 
 The sidebar only collapses when the mouse is inside the Firefox window. This keeps the sidebar visible when you switch to another app or move between tiled windows.
 
-Setting `fennec.drawer.autohide.requireFocus` to `false` makes the sidebar collapse whenever the mouse leaves it — even when leaving the Firefox window entirely. This can make entering and exiting Firefox smoother when tiling with the mouse, at the cost of making activation in fullscreen mode slightly harder and some undesirable behavior during drag-and-drop when elements morph.
+Setting `pfx.drawer.autohide.requireFocus` to `false` makes the sidebar collapse whenever the mouse leaves it — even when leaving the Firefox window entirely. This can make entering and exiting Firefox smoother when tiling with the mouse, at the cost of making activation in fullscreen mode slightly harder and some undesirable behavior during drag-and-drop when elements morph.
 
 To disable:
 1. Go to `about:config` in the address bar
-2. Set `fennec.drawer.autohide.requireFocus` to `false`
+2. Set `pfx.drawer.autohide.requireFocus` to `false`
 3. Restart Firefox
 
 ## Floating Urlbar (off by default)
@@ -28,23 +28,23 @@ When enabled, the urlbar detaches from the sidebar and floats centered on the vi
 
 To enable:
 1. Go to `about:config` in the address bar
-2. Set `fennec.urlbar.float` to `true`
+2. Set `pfx.urlbar.float` to `true`
 3. Restart Firefox
 
 ## Sidebery Custom Styles (optional)
 
-Fennec ships an optional `sidebery.css` that styles Sidebery itself to feel closer to native Firefox: larger favicons for pinned tabs, a 4-column pinned grid, and subtle translucent tab backgrounds.
+Palefox ships an optional `sidebery.css` that styles Sidebery itself to feel closer to native Firefox: larger favicons for pinned tabs, a 4-column pinned grid, and subtle translucent tab backgrounds.
 
 To enable:
 1. Open Sidebery's settings (click the extension icon, then the gear)
 2. Go to **Settings → Style editor**
-3. Paste the contents of [`sidebery.css`](https://raw.githubusercontent.com/tompassarelli/fennec/main/sidebery.css) into the editor and save
+3. Paste the contents of [`sidebery.css`](https://raw.githubusercontent.com/tompassarelli/palefox/main/sidebery.css) into the editor and save
 
 This lives outside the userChrome install because Sidebery manages its own styles through its own UI.
 
 ## Accessibility
 
-Fennec respects your OS "reduce motion" setting — all transitions become instant. On Linux you can also set `ui.prefersReducedMotion` to `1` in `about:config`.
+Palefox respects your OS "reduce motion" setting — all transitions become instant. On Linux you can also set `ui.prefersReducedMotion` to `1` in `about:config`.
 
 ## Recommended Extensions
 
@@ -55,4 +55,4 @@ Fennec respects your OS "reduce motion" setting — all transitions become insta
 **Other**
 - **[New Tab Override](https://addons.mozilla.org/en-US/firefox/addon/new-tab-override/)** - Replace the default new tab page with a custom URL. Point it at a localhost service serving a barebones HTML page (without autofocus on the URL bar) so Vimium keybindings work immediately on new tabs
 
-To get notified about new Fennec releases, [watch the GitHub repository](https://github.com/tompassarelli/fennec) and select "Releases only" under custom notifications.
+To get notified about new Palefox releases, [watch the GitHub repository](https://github.com/tompassarelli/palefox) and select "Releases only" under custom notifications.

@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
-$repo = "tompassarelli/fennec"
+$repo = "tompassarelli/palefox"
 $latestUrl = "https://api.github.com/repos/$repo/releases/latest"
 
 $force = $args -contains "--force" -or $args -contains "-Force"
@@ -13,7 +13,7 @@ if ($useLibrewolf) {
     $browserName = "LibreWolf"
     $browserProcess = "librewolf"
     $profilePattern = "*.default-default"
-} elseif (-not $env:FENNEC_LOCAL -and [Environment]::UserInteractive) {
+} elseif (-not $env:PALEFOX_LOCAL -and [Environment]::UserInteractive) {
     Write-Host "Select browser:"
     Write-Host "  1) Firefox (default)"
     Write-Host "  2) LibreWolf"
@@ -33,11 +33,11 @@ if ($useLibrewolf) {
     $profilePattern = "*.default-release"
 }
 
-$tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "fennec-install-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+$tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "palefox-install-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
 
 try {
     # Check if browser is running (skip in CI)
-    if (-not $env:FENNEC_LOCAL) {
+    if (-not $env:PALEFOX_LOCAL) {
         if (Get-Process $browserProcess -ErrorAction SilentlyContinue) {
             Write-Host "$browserName is currently running. Please close it before continuing."
             Read-Host "Press Enter to continue after closing $browserName"
@@ -82,9 +82,9 @@ try {
     $chromeDir = Join-Path $profile.FullName "chrome"
 
     # Locate chrome source files
-    if ($env:FENNEC_LOCAL) {
+    if ($env:PALEFOX_LOCAL) {
         # Use local checkout instead of downloading
-        $chromeSource = Join-Path $env:FENNEC_LOCAL "chrome"
+        $chromeSource = Join-Path $env:PALEFOX_LOCAL "chrome"
         if (-not (Test-Path $chromeSource)) {
             Write-Error "chrome folder not found at $chromeSource"
             exit 1
@@ -106,9 +106,9 @@ try {
             exit 1
         }
 
-        Write-Host "Downloading Fennec $tag..."
+        Write-Host "Downloading Palefox $tag..."
         $archiveUrl = "https://github.com/$repo/archive/refs/tags/$tag.zip"
-        $zipPath = Join-Path $tmpDir "fennec.zip"
+        $zipPath = Join-Path $tmpDir "palefox.zip"
         try {
             Invoke-RestMethod -Uri $archiveUrl -OutFile $zipPath
         } catch {
@@ -117,7 +117,7 @@ try {
         }
 
         Expand-Archive -Path $zipPath -DestinationPath $tmpDir
-        $extracted = Get-ChildItem -Path $tmpDir -Directory -Filter "fennec-*" | Select-Object -First 1
+        $extracted = Get-ChildItem -Path $tmpDir -Directory -Filter "palefox-*" | Select-Object -First 1
         $chromeSource = Join-Path $extracted.FullName "chrome"
         if (-not (Test-Path $chromeSource)) {
             Write-Error "chrome folder not found in downloaded archive."
@@ -144,7 +144,7 @@ try {
     $userChromeFile = Join-Path $chromeDir "userChrome.css"
     if (Test-Path $userChromeFile) {
         $content = Get-Content $userChromeFile -Raw
-        if ($content -match '#region dev-docs' -and $content -match '--fen-') {
+        if ($content -match '#region dev-docs' -and $content -match '--pfx-') {
             Copy-Item -Path $userChromeFile -Destination (Join-Path $chromeDir "userChrome.css.legacy")
             Remove-Item -Path $userChromeFile
             $legacyMigrated = $true
@@ -152,21 +152,13 @@ try {
     }
 
     # Install files
-    Write-Host "Installing fennec..."
-    $fennecDir = Join-Path $chromeDir "fennec"
-    $userDir = Join-Path $chromeDir "user"
+    Write-Host "Installing palefox..."
     if (-not (Test-Path $chromeDir)) {
         New-Item -ItemType Directory -Path $chromeDir | Out-Null
     }
-    if (-not (Test-Path $fennecDir)) {
-        New-Item -ItemType Directory -Path $fennecDir | Out-Null
-    }
-    if (-not (Test-Path $userDir)) {
-        New-Item -ItemType Directory -Path $userDir | Out-Null
-    }
 
     # Core files — always overwrite
-    foreach ($file in @("fennec\fennec.css")) {
+    foreach ($file in @("palefox.css")) {
         $source = Join-Path $chromeSource $file
         $dest = Join-Path $chromeDir $file
         if (Test-Path $source) {
@@ -175,7 +167,7 @@ try {
     }
 
     # User files — preserve if present, create if missing
-    foreach ($file in @("userChrome.css", "user\user.css")) {
+    foreach ($file in @("userChrome.css", "user.css")) {
         $source = Join-Path $chromeSource $file
         $dest = Join-Path $chromeDir $file
         if (Test-Path $source) {
@@ -192,7 +184,7 @@ try {
         Write-Host ""
         Write-Host "Note: Your previous userChrome.css used the legacy monolithic layout."
         Write-Host "It has been backed up to: chrome\userChrome.css.legacy"
-        Write-Host "Move any personal tweaks from that file into chrome\user\user.css"
+        Write-Host "Move any personal tweaks from that file into chrome\user.css"
     }
 
     # Configure browser preferences in user.js
@@ -218,9 +210,9 @@ try {
     Set-BrowserPref "sidebar.verticalTabs" "false"
     Set-BrowserPref "sidebar.revamp" "false"
     Set-BrowserPref "sidebar.position_start" "true"
-    Set-BrowserPref "fennec.drawer.autohide" "false"
-    Set-BrowserPref "fennec.drawer.autohide.requireFocus" "true"
-    Set-BrowserPref "fennec.urlbar.float" "false"
+    Set-BrowserPref "pfx.drawer.autohide" "false"
+    Set-BrowserPref "pfx.drawer.autohide.requireFocus" "true"
+    Set-BrowserPref "pfx.urlbar.float" "false"
 
     Write-Host "Done. Restart $browserName for changes to take effect."
 } finally {
