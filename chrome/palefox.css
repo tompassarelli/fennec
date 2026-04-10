@@ -458,7 +458,7 @@ body:has(#sidebar-box[hidden]) #urlbar {
 
   /* prevent collapse while any menu or context menu is open.
      repeats the collapse selector chain + adds :has(popup/menu open) for higher specificity. */
-  body:has(:is(toolbarbutton[open="true"], #backForwardMenu:hover, #sidebar-context-menu:hover, #sidebar-history-context-menu:hover, #sidebar-synced-tabs-context-menu:hover, #toolbar-context-menu:hover, #contentAreaContextMenu:hover)):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected])):not(:has(#tabbrowser-tabs[movingtab]))
+  body:has(:is(toolbarbutton[open="true"], #sidebar-context-menu:hover, #sidebar-history-context-menu:hover, #sidebar-synced-tabs-context-menu:hover, #toolbar-context-menu:hover, #contentAreaContextMenu:hover)):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected])):not(:has(#tabbrowser-tabs[movingtab]))
     #sidebar-box:not([hidden]) {
     width: var(--pfx-autohide-width) !important;
     min-width: 0 !important;
@@ -470,7 +470,7 @@ body:has(#sidebar-box[hidden]) #urlbar {
     transition: none !important;
   }
 
-  body:has(:is(toolbarbutton[open="true"], #backForwardMenu:hover, #sidebar-context-menu:hover, #sidebar-history-context-menu:hover, #sidebar-synced-tabs-context-menu:hover, #toolbar-context-menu:hover, #contentAreaContextMenu:hover)):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected])):not(:has(#tabbrowser-tabs[movingtab]))
+  body:has(:is(toolbarbutton[open="true"], #sidebar-context-menu:hover, #sidebar-history-context-menu:hover, #sidebar-synced-tabs-context-menu:hover, #toolbar-context-menu:hover, #contentAreaContextMenu:hover)):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected])):not(:has(#tabbrowser-tabs[movingtab]))
     #navigator-toolbox {
     margin-left: 0 !important;
     overflow: visible !important;
@@ -478,19 +478,19 @@ body:has(#sidebar-box[hidden]) #urlbar {
     transition: none !important;
   }
 
-  body:has(:is(toolbarbutton[open="true"], #backForwardMenu:hover, #sidebar-context-menu:hover, #sidebar-history-context-menu:hover, #sidebar-synced-tabs-context-menu:hover, #toolbar-context-menu:hover, #contentAreaContextMenu:hover)):not(:has(#urlbar:is([focused][breakout-extend]))):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
+  body:has(:is(toolbarbutton[open="true"], #sidebar-context-menu:hover, #sidebar-history-context-menu:hover, #sidebar-synced-tabs-context-menu:hover, #toolbar-context-menu:hover, #contentAreaContextMenu:hover)):not(:has(#urlbar:is([focused][breakout-extend]))):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover))
     toolbaritem#urlbar-container {
     width: calc(var(--pfx-autohide-width) - 9px) !important;
     max-width: calc(var(--pfx-autohide-width) - 9px) !important;
     pointer-events: auto;
   }
 
-  body:has(:is(toolbarbutton[open="true"], #backForwardMenu:hover, #sidebar-context-menu:hover, #sidebar-history-context-menu:hover, #sidebar-synced-tabs-context-menu:hover, #toolbar-context-menu:hover, #contentAreaContextMenu:hover)):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected])):not(:has(#tabbrowser-tabs[movingtab]))
+  body:has(:is(toolbarbutton[open="true"], #sidebar-context-menu:hover, #sidebar-history-context-menu:hover, #sidebar-synced-tabs-context-menu:hover, #toolbar-context-menu:hover, #contentAreaContextMenu:hover)):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected])):not(:has(#tabbrowser-tabs[movingtab]))
     #identity-icon-box {
     background-color: initial !important;
   }
 
-  body:has(:is(toolbarbutton[open="true"], #backForwardMenu:hover, #sidebar-context-menu:hover, #sidebar-history-context-menu:hover, #sidebar-synced-tabs-context-menu:hover, #toolbar-context-menu:hover, #contentAreaContextMenu:hover)):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected])):not(:has(#tabbrowser-tabs[movingtab]))
+  body:has(:is(toolbarbutton[open="true"], #sidebar-context-menu:hover, #sidebar-history-context-menu:hover, #sidebar-synced-tabs-context-menu:hover, #toolbar-context-menu:hover, #contentAreaContextMenu:hover)):not(:has(#sidebar-box:hover)):not(:has(#navigator-toolbox:hover)):not(:has(#sidebar-splitter:hover)):not(:has(.tabbrowser-tab[multiselected])):not(:has(#tabbrowser-tabs[movingtab]))
     #sidebar-splitter {
     left: var(--pfx-autohide-width) !important;
     width: var(--pfx-sidebar-splitter-width) !important;
