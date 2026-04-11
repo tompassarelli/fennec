@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="tompassarelli/palefox"
-BRANCH="stable-pure-css"
+BRANCH="main"
 
 FORCE=false
 NO_BACKUP=false
