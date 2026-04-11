@@ -32,13 +32,6 @@ irm https://raw.githubusercontent.com/tompassarelli/palefox/main/install.ps1 | i
 
 See the [full installation guide](docs/install.md) for manual install, flags, and details.
 
-## Features (stable-pure-css)
-
-- **Enhanced Sidebery Integration** — urlbar in the sidebar, expands on focus
-- **Zen Mode** — toggle sidebar to hide UI and maximize focus
-- **Minimal Chrome** — keyboard-driven, only the essentials
-- **Theme Support** — system themes (light/dark) and Firefox Color themes
-
 ## What's happening on main
 
 The CSS-only approach to features like autohide pushed the stylesheet into increasingly complicated selector chains that are fragile and hard to maintain. JS support opens the door to implementing these behaviors properly — and to ideas like a keyboard-driven centered command palette rather than the current mouse-first sidebar UX.
