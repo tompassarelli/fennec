@@ -2,7 +2,13 @@
 set -euo pipefail
 
 REPO="tompassarelli/palefox"
-BRANCH="main"
+# Fetch latest tagged release instead of HEAD
+TAG=$(curl -fsSL "https://api.github.com/repos/tompassarelli/palefox/releases/latest" | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+if [ -z "$TAG" ]; then
+    echo "Warning: could not fetch latest release tag, falling back to main"
+    TAG="main"
+fi
+BRANCH="$TAG"
 
 FORCE=false
 NO_BACKUP=false

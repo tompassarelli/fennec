@@ -7,16 +7,11 @@ Minimal, customizable Firefox/LibreWolf chrome — keyboard-first, no fork, no b
 
 </div>
 
-> **This branch (`main`) is unstable and under active development.**
-> Palefox is evolving toward heavy use of JavaScript (via [fx-autoconfig](https://github.com/MrOtherGuy/fx-autoconfig)) for features that CSS alone can't handle cleanly — like proper autohide state management and a keyboard-driven command palette.
->
-> **For the stable, CSS-only theme, use the [`stable-pure-css`](https://github.com/tompassarelli/palefox/tree/stable-pure-css) branch.**
+> **Palefox is in beta.** It's stable enough for daily use and recommended to install from the latest release on `main`. Features are actively evolving — expect rough edges.
 
-## Quick Install (unstable / main)
+## Quick Install
 
 > Please see [security considerations](#security) before installing
-
-Install [Sideberry](https://addons.mozilla.org/en-US/firefox/addon/sidebery/), then run:
 
 **macOS / Linux:**
 ```bash
@@ -30,16 +25,18 @@ irm https://raw.githubusercontent.com/tompassarelli/palefox/main/install.ps1 | i
 
 **LibreWolf:** add `--librewolf` to either command.
 
+The installer pulls from the latest tagged release, not HEAD.
+
 See the [full installation guide](docs/install.md) for manual install, flags, and details.
 
-## What's happening on main
+## Features
 
-The CSS-only approach to features like autohide pushed the stylesheet into increasingly complicated selector chains that are fragile and hard to maintain. JS support opens the door to implementing these behaviors properly — and to ideas like a keyboard-driven centered command palette rather than the current mouse-first sidebar UX.
-
-This branch includes:
-- Vendored [fx-autoconfig](https://github.com/MrOtherGuy/fx-autoconfig) loader (v0.10.14)
-- `chrome/JS/` directory for userChrome scripts
-- Updated install scripts and Nix module with `jsLoader` option
+- **Compact mode** — sidebar autohides off-screen, revealed on left-edge hover with spring animation (`pfx.sidebar.compact` in about:config)
+- **Collapse layout** — sidebar shrinks to icons-only strip, toolbox returns to horizontal bar
+- **Custom sidebar button** — left-click: toggle compact mode, right-click: layout options
+- **Urlbar breakout** — expands to 600px when focused in sidebar
+- **Theme-respecting** — uses Firefox's native CSS variables, works with any theme
+- Powered by [fx-autoconfig](https://github.com/MrOtherGuy/fx-autoconfig) for chrome JS
 
 ## Docs
 
@@ -47,21 +44,21 @@ This branch includes:
 - [Nix / Home Manager](docs/nix.md)
 - [Features & options](docs/features.md)
 - [Customization](docs/customization.md)
+- [Compact mode audit (Zen Browser comparison)](docs/compact-mode-zen-audit.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Security
 
 - Extensions are privileged software — install only ones you trust
-- Zen Mode can hide browser security indicators; verify pages before browsing with the UI hidden
 - Review install scripts before piping them into your shell
-- The JS loader on `main` runs chrome-privileged code — review scripts in `chrome/JS/` before use
+- The JS loader runs chrome-privileged code — review scripts in `chrome/JS/` before use
 - Palefox is a UI customization, not a security tool — use it with normal caution
 
 ## Acknowledgments
 
 Palefox draws inspiration from:
 
-- [Zen Browser](https://zen-browser.app/) — sidebar design
+- [Zen Browser](https://zen-browser.app/) — compact mode state machine and sidebar design
 - [GWfox](https://github.com/akkva/gwfox) — CSS theming techniques
 - [FF-ULTIMA](https://github.com/soulhotel/FF-ULTIMA) — feature and layout ideas
 - [parfait](https://github.com/reizumii/parfait) — findbar and accessibility
