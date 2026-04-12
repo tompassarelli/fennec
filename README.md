@@ -9,6 +9,12 @@ Minimal, customizable Firefox/LibreWolf chrome — keyboard-first, no fork, no b
 
 > **Palefox is in beta.** It's stable enough for daily use and recommended to install from the latest release on `main`. Features are actively evolving — expect rough edges.
 
+![Default mode — vertical tabs, expanded layout](https://github.com/user-attachments/assets/9d89d845-e5c4-4fb4-ae9a-eb36da9ddde8)
+
+![Vertical tabs — collapsed layout](https://github.com/user-attachments/assets/a5e4bc4c-f239-4b8d-8435-3150d4e7252e)
+
+![Tiled in compact (zen) mode](https://github.com/user-attachments/assets/8a9e2552-6c91-412f-ad2b-e41274e2e2ac)
+
 ## Quick Install
 
 > Please see [security considerations](#security) before installing
