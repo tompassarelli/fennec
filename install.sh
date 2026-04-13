@@ -81,7 +81,7 @@ case "$(uname -s)" in
             native_dir="$HOME/.mozilla/firefox"
         fi
         # Snap Firefox mounts its app directory read-only — fx-autoconfig can't be installed
-        if [ -d "${snap_dir:-}" ]; then
+        if [ "$BROWSER_NAME" = "Firefox" ] && [ -d "/snap/firefox" ]; then
             echo "Error: Snap Firefox detected."
             echo "Palefox requires writing to the Firefox application directory, which"
             echo "snap packages mount as read-only. CSS-only theming is available on"
