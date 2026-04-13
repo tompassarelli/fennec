@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/logo.png" alt="Palefox logo" width="96" />
+  <img src="docs/logo.png" alt="Palefox logo" width="200" />
 
 # Palefox
 
