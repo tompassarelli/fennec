@@ -68,6 +68,10 @@
   padding: 0 12px !important;
 }
 
+#PanelUI-menu-button {
+  padding-inline-end: 0 !important;
+}
+
 /* #endregion navigator-toolbox */
 
 
@@ -97,8 +101,12 @@
   padding: 0 !important;
 }
 
-#sidebar-main #pfx-urlbar-toolbar #urlbar {
-  left: 12px !important;
+@media -moz-pref("sidebar.position_start") {
+  #sidebar-main #pfx-urlbar-toolbar #urlbar { left: 12px !important; }
+}
+
+@media not -moz-pref("sidebar.position_start") {
+  #sidebar-main #pfx-urlbar-toolbar #urlbar { right: 12px !important; }
 }
 
 /* breakout: let the urlbar expand past the sidebar when focused.
