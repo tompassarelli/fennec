@@ -92,13 +92,16 @@ case "$(uname -s)" in
             echo "  sudo apt install -t 'o=LP-PPA-mozillateam' firefox"
             exit 1
         fi
-        if [ -d "${flatpak_dir:-}" ]; then
-            profiles_dir="$flatpak_dir"
-        elif [ -n "${xdg_dir:-}" ] && [ -d "$xdg_dir" ]; then
-            profiles_dir="$xdg_dir"
-        elif [ -d "$native_dir" ]; then
-            profiles_dir="$native_dir"
-        else
+        # Pick the first directory that actually contains profiles
+        profiles_dir=""
+        for candidate_dir in "${flatpak_dir:-}" "${xdg_dir:-}" "$native_dir"; do
+            [ -n "$candidate_dir" ] && [ -d "$candidate_dir" ] || continue
+            if find "$candidate_dir" -maxdepth 1 -type d -name '*.*' 2>/dev/null | grep -q .; then
+                profiles_dir="$candidate_dir"
+                break
+            fi
+        done
+        if [ -z "$profiles_dir" ]; then
             echo "Error: No $BROWSER_NAME profile directory found."
             exit 1
         fi
