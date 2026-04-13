@@ -64,6 +64,8 @@
 
 #nav-bar {
   border: none !important;
+  margin: 6px 0 !important;
+  padding: 0 12px !important;
 }
 
 /* #endregion navigator-toolbox */
@@ -87,11 +89,16 @@
 #pfx-urlbar-toolbar {
   flex: none !important;
   overflow: hidden !important;
+  margin: 12px 0 !important;
 }
 
 #pfx-urlbar-toolbar #urlbar-container {
-  margin: 0px !important;
-  padding: var(--pfx-gap) !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+#sidebar-main #pfx-urlbar-toolbar #urlbar {
+  left: 12px !important;
 }
 
 /* breakout: let the urlbar expand past the sidebar when focused.
@@ -165,9 +172,6 @@ body:has(#sidebar-box[hidden]):has(#identity-box.notSecure)::before {
   outline: none !important;
 }
 
-#pfx-sidebar-button {
-  padding-inline-start: 13px !important;
-}
 
 /* #endregion sidebar-button */
 

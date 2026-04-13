@@ -47,7 +47,8 @@
     if (!urlbar || updating) return;
     if (urlbar.hasAttribute("breakout-extend")) return;
     updating = true;
-    const w = Math.max(0, sidebarMain.getBoundingClientRect().width - gap * 2);
+    // 12px margin per side to match vertical tab inset
+    const w = Math.max(0, sidebarMain.getBoundingClientRect().width - 24);
     urlbar.style.setProperty("--urlbar-width", w + "px");
     updating = false;
   }
