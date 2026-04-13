@@ -423,6 +423,7 @@ body:has(#sidebar-box[hidden]) #urlbar {
     #navigator-toolbox {
     margin-left: calc(0px - var(--pfx-autohide-width)) !important;
     overflow: hidden !important;
+    pointer-events: none;
     transition: margin-left var(--pfx-transition-normal) var(--pfx-fx-sidebar) var(--pfx-autohide-collapse-delay) !important;
   }
 
