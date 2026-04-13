@@ -61,3 +61,5 @@ Palefox draws inspiration from:
 - [GWfox](https://github.com/akkva/gwfox) — CSS theming techniques
 - [FF-ULTIMA](https://github.com/soulhotel/FF-ULTIMA) — feature and layout ideas
 - [parfait](https://github.com/reizumii/parfait) — findbar and accessibility
+- [Nyxt](https://nyxt-browser.com/) — keyboard-driven, programmable browser philosophy
+- [qutebrowser](https://qutebrowser.org/) — keyboard-first, minimal UI ethos
