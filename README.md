@@ -11,8 +11,6 @@ A developer-focused alternative to Zen Browser on upstream Firefox
 
 </div>
 
-> **Palefox is in beta.** It's stable enough for daily use and recommended to install from the latest release on `main`. Features are actively evolving — expect rough edges.
-
 ![Default mode — vertical tabs, expanded layout](https://github.com/user-attachments/assets/9d89d845-e5c4-4fb4-ae9a-eb36da9ddde8)
 
 ![Vertical tabs — collapsed layout](https://github.com/user-attachments/assets/a5e4bc4c-f239-4b8d-8435-3150d4e7252e)
@@ -63,6 +61,8 @@ See the [full installation guide](docs/install.md) for manual install, flags, an
 - Review install scripts before piping them into your shell
 - The JS loader runs chrome-privileged code — review scripts in `chrome/JS/` before use
 - Palefox is a UI customization, not a security tool — use it with normal caution
+
+> **Palefox is in beta.** It's stable enough for daily use and recommended to install from the latest release on `main`. Features are actively evolving — expect rough edges.
 
 ## Acknowledgments
 
