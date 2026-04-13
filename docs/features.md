@@ -1,46 +1,31 @@
 # Features & Options
 
-## Autohide (off by default)
+## Sidebar Button (right-click menu)
 
-Sidebar must be enabled (not toggled off). When enabled, the drawer auto-collapses when the mouse leaves and reappears when hovering the left edge of the window.
+Right-click the sidebar button (bottom of the sidebar) to access:
 
-To enable:
-1. Go to `about:config` in the address bar
-2. Set `pfx.drawer.autohide` to `true`
-3. Restart Firefox
+- **Enable/Disable Compact** — autohide sidebar off-screen, revealed on left-edge hover with spring animation
+- **Expand/Collapse Layout** — toggle between full sidebar and icons-only strip
+- **Horizontal/Vertical Tabs** — switch tab orientation
+- **Customize Sidebar** — open Firefox's native sidebar settings
 
-> **Linux users:** You may need to set `widget.gtk.ignore-bogus-leave-notify` to `1` in `about:config`. Without this, GTK can send spurious leave events that cause the sidebar to collapse unexpectedly.
+Left-click the sidebar button toggles compact mode directly.
 
-### Require Focus (on by default)
+## Compact Mode
 
-The sidebar only collapses when the mouse is inside the Firefox window. This keeps the sidebar visible when you switch to another app or move between tiled windows.
+When enabled, the sidebar slides off-screen and reappears when you hover the left edge. Popup menus and context menus keep the sidebar visible while open. The urlbar breakout still works — focus the urlbar and it expands past the sidebar.
 
-Setting `pfx.drawer.autohide.requireFocus` to `false` makes the sidebar collapse whenever the mouse leaves it — even when leaving the Firefox window entirely. This can make entering and exiting Firefox smoother when tiling with the mouse, at the cost of making activation in fullscreen mode slightly harder and some undesirable behavior during drag-and-drop when elements morph.
+Can also be toggled via `pfx.sidebar.compact` in `about:config`.
 
-To disable:
-1. Go to `about:config` in the address bar
-2. Set `pfx.drawer.autohide.requireFocus` to `false`
-3. Restart Firefox
+> **Linux users:** Set `widget.gtk.ignore-bogus-leave-notify` to `1` in `about:config`. Without this, GTK can send spurious leave events that cause the sidebar to collapse unexpectedly.
 
-## Floating Urlbar (off by default)
+## about:config Options
 
-When enabled, the urlbar detaches from the sidebar and floats centered on the viewport when focused — like a spotlight/command palette. A "Searching..." placeholder stays in the sidebar.
-
-To enable:
-1. Go to `about:config` in the address bar
-2. Set `pfx.urlbar.float` to `true`
-3. Restart Firefox
-
-## Sidebery Custom Styles (optional)
-
-Palefox ships an optional `sidebery.css` that styles Sidebery itself to feel closer to native Firefox: larger favicons for pinned tabs, a 4-column pinned grid, and subtle translucent tab backgrounds.
-
-To enable:
-1. Open Sidebery's settings (click the extension icon, then the gear)
-2. Go to **Settings → Style editor**
-3. Paste the contents of [`sidebery.css`](https://raw.githubusercontent.com/tompassarelli/palefox/main/sidebery.css) into the editor and save
-
-This lives outside the userChrome install because Sidebery manages its own styles through its own UI.
+| Pref | Default | Description |
+|------|---------|-------------|
+| `pfx.sidebar.compact` | `false` | Autohide sidebar, reveal on left-edge hover |
+| `pfx.sidebar.menuBar` | `false` | Show the menu bar |
+| `pfx.sidebar.newTab` | `false` | Show the new tab button in the sidebar |
 
 ## Accessibility
 

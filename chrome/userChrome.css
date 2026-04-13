@@ -1,8 +1,9 @@
 /* palefox — entry point
  *
- * Toggle features in about:config (type "palefox." to see all options):
- *   pfx.sidebar.compact                — autohide sidebar, reveal on left-edge hover
- *   pfx.urlbar.float                   — float urlbar centered on viewport when focused
+ * Right-click the sidebar button for layout options:
+ *   Enable/Disable Compact — autohide sidebar
+ *   Expand/Collapse Layout — icons-only strip
+ *   Horizontal/Vertical Tabs — switch tab orientation
  *
  * Put your personal CSS in user.css — it won't be
  * overwritten when palefox is updated.

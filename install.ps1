@@ -267,9 +267,6 @@ try {
     Set-BrowserPref "sidebar.verticalTabs" "false"
     Set-BrowserPref "sidebar.revamp" "false"
     Set-BrowserPref "sidebar.position_start" "true"
-    Set-BrowserPref "pfx.drawer.autohide" "false"
-    Set-BrowserPref "pfx.drawer.autohide.requireFocus" "false"
-    Set-BrowserPref "pfx.urlbar.float" "false"
 
     Write-Host "Done. Restart $browserName for changes to take effect."
 } finally {

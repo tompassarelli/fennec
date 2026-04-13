@@ -49,7 +49,6 @@ jobs:
           grep -q 'sidebar.verticalTabs' "$profile/user.js" || { echo "FAIL: sidebar.verticalTabs pref missing"; exit 1; }
           grep -q 'sidebar.revamp' "$profile/user.js" || { echo "FAIL: sidebar.revamp pref missing"; exit 1; }
           grep -q 'sidebar.position_start' "$profile/user.js" || { echo "FAIL: sidebar.position_start pref missing"; exit 1; }
-          grep -q 'pfx.drawer.autohide' "$profile/user.js" || { echo "FAIL: pfx.drawer.autohide pref missing"; exit 1; }
 
           # fx-autoconfig loader (profile)
           test -d "$profile/chrome/utils" || { echo "FAIL: utils/ missing"; exit 1; }
@@ -93,7 +92,6 @@ jobs:
           grep -q 'sidebar.verticalTabs' "$profile/user.js" || { echo "FAIL: sidebar.verticalTabs pref missing"; exit 1; }
           grep -q 'sidebar.revamp' "$profile/user.js" || { echo "FAIL: sidebar.revamp pref missing"; exit 1; }
           grep -q 'sidebar.position_start' "$profile/user.js" || { echo "FAIL: sidebar.position_start pref missing"; exit 1; }
-          grep -q 'pfx.drawer.autohide' "$profile/user.js" || { echo "FAIL: pfx.drawer.autohide pref missing"; exit 1; }
 
           # Confirm native path was NOT used
           if [ -d "$HOME/.mozilla/firefox" ]; then
@@ -134,7 +132,6 @@ jobs:
           grep -q 'sidebar.verticalTabs' "$profile/user.js" || { echo "FAIL: sidebar.verticalTabs pref missing"; exit 1; }
           grep -q 'sidebar.revamp' "$profile/user.js" || { echo "FAIL: sidebar.revamp pref missing"; exit 1; }
           grep -q 'sidebar.position_start' "$profile/user.js" || { echo "FAIL: sidebar.position_start pref missing"; exit 1; }
-          grep -q 'pfx.drawer.autohide' "$profile/user.js" || { echo "FAIL: pfx.drawer.autohide pref missing"; exit 1; }
 
           echo "--- chrome/ contents ---"
           ls -laR "$profile/chrome/"
@@ -186,7 +183,6 @@ jobs:
           if ($userJs -notmatch "sidebar.verticalTabs") { Write-Error "FAIL: sidebar.verticalTabs pref missing"; exit 1 }
           if ($userJs -notmatch "sidebar.revamp") { Write-Error "FAIL: sidebar.revamp pref missing"; exit 1 }
           if ($userJs -notmatch "sidebar.position_start") { Write-Error "FAIL: sidebar.position_start pref missing"; exit 1 }
-          if ($userJs -notmatch "pfx.drawer.autohide") { Write-Error "FAIL: pfx.drawer.autohide pref missing"; exit 1 }
 
           Write-Host "--- chrome/ contents ---"
           Get-ChildItem "$($prof.FullName)\chrome" -Recurse
@@ -301,7 +297,6 @@ jobs:
           test -f "$profile/chrome/user.css" || { echo "FAIL: user.css missing"; exit 1; }
           grep -q '@import url("palefox.css")' "$profile/chrome/userChrome.css" || { echo "FAIL: palefox.css import missing"; exit 1; }
           grep -q 'toolkit.legacyUserProfileCustomizations.stylesheets' "$profile/user.js" || { echo "FAIL: stylesheets pref missing"; exit 1; }
-          grep -q 'pfx.drawer.autohide' "$profile/user.js" || { echo "FAIL: pfx.drawer.autohide pref missing"; exit 1; }
 
           echo "--- chrome/ contents ---"
           ls -laR "$profile/chrome/"
@@ -340,7 +335,6 @@ jobs:
           test -f "$profile/chrome/user.css" || { echo "FAIL: user.css missing"; exit 1; }
           grep -q '@import url("palefox.css")' "$profile/chrome/userChrome.css" || { echo "FAIL: palefox.css import missing"; exit 1; }
           grep -q 'toolkit.legacyUserProfileCustomizations.stylesheets' "$profile/user.js" || { echo "FAIL: stylesheets pref missing"; exit 1; }
-          grep -q 'pfx.drawer.autohide' "$profile/user.js" || { echo "FAIL: pfx.drawer.autohide pref missing"; exit 1; }
 
           echo "--- chrome/ contents ---"
           ls -laR "$profile/chrome/"
@@ -395,7 +389,6 @@ jobs:
           if ($userChrome -notmatch '@import url\("palefox.css"\)') { Write-Error "FAIL: palefox.css import missing"; exit 1 }
           $userJs = Get-Content "$($prof.FullName)\user.js" -Raw
           if ($userJs -notmatch "toolkit.legacyUserProfileCustomizations.stylesheets") { Write-Error "FAIL: stylesheets pref missing"; exit 1 }
-          if ($userJs -notmatch "pfx.drawer.autohide") { Write-Error "FAIL: pfx.drawer.autohide pref missing"; exit 1 }
 
           Write-Host "--- chrome/ contents ---"
           Get-ChildItem "$($prof.FullName)\chrome" -Recurse

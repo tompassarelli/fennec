@@ -37,10 +37,10 @@ See the [full installation guide](docs/install.md) for manual install, flags, an
 
 ## Features
 
-- **Compact mode** — sidebar autohides off-screen, revealed on left-edge hover with spring animation (`pfx.sidebar.compact` in about:config)
+- **Compact mode** — sidebar autohides off-screen, revealed on left-edge hover with spring animation
 - **Collapse layout** — sidebar shrinks to icons-only strip, toolbox returns to horizontal bar
-- **Custom sidebar button** — left-click: toggle compact mode, right-click: layout options
-- **Urlbar breakout** — expands to 600px when focused in sidebar
+- **Sidebar button** — left-click toggles compact mode, right-click opens layout options (compact, collapse, tab orientation)
+- **Urlbar breakout** — expands past the sidebar when focused
 - **Theme-respecting** — uses Firefox's native CSS variables, works with any theme
 - Powered by [fx-autoconfig](https://github.com/MrOtherGuy/fx-autoconfig) for chrome JS
 
