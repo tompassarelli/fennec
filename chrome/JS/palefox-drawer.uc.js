@@ -195,19 +195,20 @@
   // Zen uses ZenHasPolyfill MutationObserver for [open], [panelopen],
   // [breakout-extend] — we use querySelector which is simpler and
   // sufficient for our single-element case.
-  // Track open popups (context menus, panels) so compact mode doesn't
-  // hide the sidebar while a menu is visible. Only count XUL popups,
-  // not HTML popovers like the urlbar's breakout.
+  // Popup guard counter — same pattern as Firefox's browser-sidebar.js
+  // (_hoverBlockerCount). Prevents hiding while menus/panels are open.
+  // Uses composedTarget to cross shadow DOM boundaries, excludes
+  // tooltips which fire constantly and would inflate the counter.
   let _openPopups = 0;
   document.addEventListener("popupshown", (e) => {
-    if (e.target.localName === "menupopup" || e.target.localName === "panel") {
-      _openPopups++;
-    }
+    const tag = (e.composedTarget || e.target).tagName;
+    if (tag === "tooltip") return;
+    _openPopups++;
   });
   document.addEventListener("popuphidden", (e) => {
-    if (e.target.localName === "menupopup" || e.target.localName === "panel") {
-      _openPopups = Math.max(0, _openPopups - 1);
-    }
+    const tag = (e.composedTarget || e.target).tagName;
+    if (tag === "tooltip") return;
+    _openPopups = Math.max(0, _openPopups - 1);
   });
 
   function isGuarded() {
