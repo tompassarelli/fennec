@@ -140,7 +140,7 @@ else
     # Download stable branch
     tmp_dir="$(mktemp -d)"
     echo "Downloading Palefox ($BRANCH)..."
-    archive_url="https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz"
+    archive_url="https://github.com/$REPO/archive/refs/tags/$BRANCH.tar.gz"
     if ! curl -fsSL "$archive_url" | tar -xz -C "$tmp_dir"; then
         echo "Error: Failed to download archive. Check your internet connection."
         exit 1
