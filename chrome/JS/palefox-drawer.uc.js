@@ -2,7 +2,6 @@
 // @name           Palefox Drawer
 // @description    Manages sidebar layout, compact mode, and toolbar positioning
 // @include        main
-// @onlyonce
 // ==/UserScript==
 
 (() => {
