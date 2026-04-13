@@ -142,7 +142,11 @@ else
     # Download stable branch
     tmp_dir="$(mktemp -d)"
     echo "Downloading Palefox ($BRANCH)..."
-    archive_url="https://github.com/$REPO/archive/refs/tags/$BRANCH.tar.gz"
+    if [ "$BRANCH" = "main" ]; then
+        archive_url="https://github.com/$REPO/archive/refs/heads/main.tar.gz"
+    else
+        archive_url="https://github.com/$REPO/archive/refs/tags/$BRANCH.tar.gz"
+    fi
     if ! curl -fsSL "$archive_url" | tar -xz -C "$tmp_dir"; then
         echo "Error: Failed to download archive. Check your internet connection."
         exit 1
@@ -194,14 +198,11 @@ if [ -d "$extracted/utils" ]; then
     cp "$extracted/utils/"* "$chrome_dir/utils/"
 fi
 
-# Default scripts — add if missing
+# JS scripts — always overwrite (managed by palefox)
 if [ -d "$extracted/JS" ]; then
     for file in "$extracted/JS/"*; do
         [ -f "$file" ] || continue
-        dest="$chrome_dir/JS/$(basename "$file")"
-        if [ ! -f "$dest" ]; then
-            cp "$file" "$dest"
-        fi
+        cp "$file" "$chrome_dir/JS/"
     done
 fi
 
