@@ -199,15 +199,19 @@
   // (_hoverBlockerCount). Prevents hiding while menus/panels are open.
   // Uses composedTarget to cross shadow DOM boundaries, excludes
   // tooltips which fire constantly and would inflate the counter.
+  // Popup guard counter — same pattern as Firefox's browser-sidebar.js.
+  // Exclude tooltips and tab-preview-panel (fires mismatched events).
   let _openPopups = 0;
+  function _isIgnoredPopup(e) {
+    const el = e.composedTarget || e.target;
+    return el.tagName === "tooltip" || el.id === "tab-preview-panel";
+  }
   document.addEventListener("popupshown", (e) => {
-    const tag = (e.composedTarget || e.target).tagName;
-    if (tag === "tooltip") return;
+    if (_isIgnoredPopup(e)) return;
     _openPopups++;
   });
   document.addEventListener("popuphidden", (e) => {
-    const tag = (e.composedTarget || e.target).tagName;
-    if (tag === "tooltip") return;
+    if (_isIgnoredPopup(e)) return;
     _openPopups = Math.max(0, _openPopups - 1);
   });
 
