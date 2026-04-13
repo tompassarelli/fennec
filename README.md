@@ -60,8 +60,6 @@ See the [full installation guide](docs/install.md) for manual install, flags, an
 - Extensions are privileged software — install only ones you trust
 - Review install scripts before piping them into your shell
 - The JS loader runs chrome-privileged code — review scripts in `chrome/JS/` before use
-- Palefox is a UI customization, not a security tool — use it with normal caution
-
 > **Palefox is in beta.** It's stable enough for daily use and recommended to install from the latest release on `main`. Features are actively evolving — expect rough edges.
 
 ## Acknowledgments
