@@ -235,6 +235,15 @@ if [ -d "$program_source" ]; then
             ;;
         Linux)
             app_dir="$(dirname "$(readlink -f "$(which "$BROWSER_PROCESS" 2>/dev/null)")" 2>/dev/null)"
+            # which may resolve to a wrapper in /usr/bin — fall back to known paths
+            if [ "$app_dir" = "/usr/bin" ] || [ ! -f "$app_dir/application.ini" ]; then
+                for candidate in /usr/lib/"$BROWSER_PROCESS" /usr/lib64/"$BROWSER_PROCESS" /opt/"$BROWSER_PROCESS" /snap/"$BROWSER_PROCESS"/current/usr/lib/"$BROWSER_PROCESS"; do
+                    if [ -f "$candidate/application.ini" ]; then
+                        app_dir="$candidate"
+                        break
+                    fi
+                done
+            fi
             ;;
     esac
 
