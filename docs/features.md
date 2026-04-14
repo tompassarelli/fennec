@@ -26,6 +26,7 @@ Can also be toggled via `pfx.sidebar.compact` in `about:config`.
 | `pfx.sidebar.compact` | `false` | Autohide sidebar, reveal on left-edge hover |
 | `pfx.sidebar.menuBar` | `false` | Show the menu bar |
 | `pfx.sidebar.newTab` | `false` | Show the new tab button in the sidebar |
+| `pfx.view.draggable-sidebar` | `true` | Drag the window from empty sidebar space |
 
 ## Accessibility
 

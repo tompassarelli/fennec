@@ -124,6 +124,84 @@
     }
   }
 
+  // --- Draggable sidebar overlay ---
+  // -moz-window-dragging only works on light DOM XUL elements.
+  // The empty tab area is inside a shadow root, so we overlay a
+  // transparent light DOM box over it and keep its geometry in sync.
+  // Pref: pfx.view.draggable-sidebar (default true, Zen-compatible)
+
+  let dragOverlay = null;
+  let dragResizeObs = null;
+  let dragMutationObs = null;
+  const arrowscrollbox = document.getElementById("tabbrowser-arrowscrollbox");
+
+  function updateDragOverlay() {
+    if (!dragOverlay || !arrowscrollbox) return;
+    const containerRect = sidebarMain.getBoundingClientRect();
+    const asbRect = arrowscrollbox.getBoundingClientRect();
+
+    // Find the last visible tab to calculate where empty space starts
+    const tabs = arrowscrollbox.querySelectorAll("tab.tabbrowser-tab");
+    const lastTab = tabs.length ? tabs[tabs.length - 1] : null;
+
+    let top;
+    if (lastTab) {
+      const tabRect = lastTab.getBoundingClientRect();
+      top = tabRect.bottom;
+    } else {
+      top = asbRect.top;
+    }
+
+    const bottom = asbRect.bottom;
+    const height = Math.max(0, bottom - top);
+
+    dragOverlay.style.left = (asbRect.left - containerRect.left) + "px";
+    dragOverlay.style.top = (top - containerRect.top) + "px";
+    dragOverlay.style.width = asbRect.width + "px";
+    dragOverlay.style.height = height + "px";
+    dragOverlay.style.display = height > 0 ? "" : "none";
+  }
+
+  function draggableEnable() {
+    if (dragOverlay) return;
+    dragOverlay = document.createXULElement("box");
+    dragOverlay.id = "pfx-drag-overlay";
+    sidebarMain.appendChild(dragOverlay);
+    if (arrowscrollbox) {
+      dragResizeObs = new ResizeObserver(updateDragOverlay);
+      dragResizeObs.observe(arrowscrollbox);
+      dragMutationObs = new MutationObserver(updateDragOverlay);
+      dragMutationObs.observe(arrowscrollbox, { childList: true });
+    }
+    updateDragOverlay();
+  }
+
+  function draggableDisable() {
+    if (!dragOverlay) return;
+    dragResizeObs?.disconnect();
+    dragMutationObs?.disconnect();
+    dragResizeObs = null;
+    dragMutationObs = null;
+    dragOverlay.remove();
+    dragOverlay = null;
+  }
+
+  const DRAGGABLE_PREF = "pfx.view.draggable-sidebar";
+
+  if (Services.prefs.getBoolPref(DRAGGABLE_PREF, true)) {
+    draggableEnable();
+  }
+
+  Services.prefs.addObserver(DRAGGABLE_PREF, {
+    observe() {
+      if (Services.prefs.getBoolPref(DRAGGABLE_PREF, true)) {
+        draggableEnable();
+      } else {
+        draggableDisable();
+      }
+    },
+  });
+
   // --- Initialize layout based on current sidebar state ---
 
   if (sidebarMain.hasAttribute("sidebar-launcher-expanded")) {

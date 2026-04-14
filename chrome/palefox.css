@@ -259,3 +259,15 @@ body:has(#sidebar-box[hidden]):has(#identity-box.notSecure)::before {
 }
 
 /* #endregion compact mode */
+
+
+/* #region draggable sidebar — drag window from empty sidebar space */
+
+#pfx-drag-overlay {
+  position: absolute !important;
+  pointer-events: auto !important;
+  -moz-window-dragging: drag;
+  z-index: 0;
+}
+
+/* #endregion draggable sidebar */
