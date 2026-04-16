@@ -117,12 +117,10 @@ img {
 /* Screenshots */
 
 .screenshots {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
   max-width: 56rem;
   margin: 0 auto;
   padding: 0 1.5rem 4rem;
+  text-align: center;
 }
 
 .screenshots figure {
