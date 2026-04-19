@@ -2,4 +2,4 @@
 sideberry-data.json
 
 # Chrome DOM dump artifacts (keep the dump script, not the output)
-docs/chrome-reference/*-dom-*.txt
+docs/chrome-reference/*-dom-*.txtNOTES/

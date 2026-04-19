@@ -52,15 +52,24 @@
   // Multi-select
   const selection = new Set();      // rows in the current selection
 
+  // Tabs currently being moved by palefox via gBrowser.moveTab. During a
+  // move, Firefox transiently toggles `busy` on the tab (animation state);
+  // if syncTabRow observes `busy=true` and mirrors it to the row, CSS fades
+  // the row's icon. We skip the busy-sync and tree-resync for tabs in this
+  // set for the duration of the move, then do one clean resync after.
+  // Pattern cribbed from Sidebery (src/services/tabs.fg.move.ts:335-371).
+  const movingTabs = new Set();
+
   // Recently-closed tab memory, for restoring hierarchy on Ctrl+Shift+T.
   // Matched by URL on reopen; parent is looked up by id.
   const CLOSED_MEMORY = 32;
   const closedTabs = [];            // [{ url, id, parentId, name, state, collapsed }]
 
-  // Saved tab state from last session's tree file, indexed by URL.
-  // Consulted by onTabRestoring when a tab URL shows up that wasn't live at init
-  // (e.g. Firefox undoCloseWindow / late session restore of an entire window).
-  const savedTabState = new Map();  // url → [saved node, ...]
+  // Ordered queue of saved-tab nodes left over from last session's tree file
+  // after the load-time positional match. Session-restore tabs arriving later
+  // via onTabOpen consume entries from the head of this queue in order,
+  // using URL when resolvable and positional-blindspot when pending.
+  const savedTabQueue = [];
 
   let nextTabId = 1;
 
@@ -101,7 +110,9 @@
         id = nextTabId++;
         pinTabId(tab, id);
       }
-      treeOf.set(tab, { id, level: 0, name: null, state: null, collapsed: false });
+      treeOf.set(tab, {
+        id, parentId: null, name: null, state: null, collapsed: false,
+      });
     }
     return treeOf.get(tab);
   }
@@ -114,21 +125,39 @@
     return null;
   }
 
-  // Find a tab's current parent in the tree: nearest preceding tab at a lower level.
-  function parentOfTab(tab) {
-    const row = rowOf.get(tab);
-    if (!row) return null;
-    const myLevel = treeData(tab).level;
-    if (myLevel <= 0) return null;
-    let r = row.previousElementSibling;
-    while (r) {
-      if (r._tab && treeData(r._tab).level < myLevel) return r._tab;
-      r = r.previousElementSibling;
+  // Depth of a tab in the tree = number of parent-chain hops to root.
+  // Guards against cycles defensively.
+  function levelOf(tab) {
+    let lv = 0, t = tab;
+    const seen = new Set();
+    while (t && !seen.has(t)) {
+      seen.add(t);
+      const pid = treeData(t).parentId;
+      if (!pid) break;
+      const p = tabById(pid);
+      if (!p) break;
+      lv++;
+      t = p;
     }
-    return null;
+    return lv;
   }
 
-  // Unified data access — works for both tab rows and group rows
+  // Polymorphic level for a row: computed for tab rows, stored for groups.
+  function levelOfRow(row) {
+    if (!row) return 0;
+    if (row._group) return row._group.level || 0;
+    if (row._tab) return levelOf(row._tab);
+    return 0;
+  }
+
+  // Find a tab's current parent — direct parentId lookup.
+  function parentOfTab(tab) {
+    return tabById(treeData(tab).parentId);
+  }
+
+  // Unified data access — works for both tab rows and group rows.
+  // Note: for tab rows this returns treeData (which has parentId, not level).
+  // Use levelOfRow(row) when you need level for either kind.
   function dataOf(row) {
     if (row._group) return row._group;
     if (row._tab) return treeData(row._tab);
@@ -149,21 +178,18 @@
   function hasChildren(row) {
     const next = row.nextElementSibling;
     if (!next || next === spacer) return false;
-    const d = dataOf(row);
-    const nd = dataOf(next);
-    return d && nd && nd.level > d.level;
+    return levelOfRow(next) > levelOfRow(row);
   }
 
-  // Get row + all deeper rows immediately following it
+  // Get row + all deeper rows immediately following it (level-based walk,
+  // works for mixed tab+group subtrees because levelOfRow is polymorphic).
   function subtreeRows(row) {
-    const d = dataOf(row);
-    if (!d) return [row];
-    const lv = d.level;
+    if (!row) return [];
+    const lv = levelOfRow(row);
     const out = [row];
     let next = row.nextElementSibling;
     while (next && next !== spacer) {
-      const nd = dataOf(next);
-      if (!nd || nd.level <= lv) break;
+      if (levelOfRow(next) <= lv) break;
       out.push(next);
       next = next.nextElementSibling;
     }
@@ -271,12 +297,16 @@
     );
 
     row.toggleAttribute("selected", tab.selected);
-    row.toggleAttribute("busy", tab.hasAttribute("busy"));
+    // Skip `busy` sync while we're moving this tab — Firefox toggles busy
+    // during its move animation and would otherwise fade the row's icon.
+    if (!movingTabs.has(tab)) {
+      row.toggleAttribute("busy", tab.hasAttribute("busy"));
+    }
     row.toggleAttribute("pinned", tab.pinned);
     row.toggleAttribute("pfx-collapsed",
       !!td.collapsed && hasChildren(row));
 
-    row.style.paddingInlineStart = (td.level * INDENT + 8) + "px";
+    row.style.paddingInlineStart = (levelOf(tab) * INDENT + 8) + "px";
   }
 
   // --- Group rows ---
@@ -348,12 +378,13 @@
     for (const row of allRows()) {
       const d = dataOf(row);
       if (!d) continue;
-      if (hideBelow >= 0 && d.level > hideBelow) {
+      const lv = levelOfRow(row);
+      if (hideBelow >= 0 && lv > hideBelow) {
         row.hidden = true;
         continue;
       }
       row.hidden = false;
-      hideBelow = (d.collapsed && hasChildren(row)) ? d.level : -1;
+      hideBelow = (d.collapsed && hasChildren(row)) ? lv : -1;
     }
     updateHorizontalGrid();
   }
@@ -372,7 +403,7 @@
         row.removeAttribute("pfx-popout-child");
         continue;
       }
-      if (d.level === 0 || col === 0) {
+      if (levelOfRow(row) === 0 || col === 0) {
         col++;
         rowInCol = 0;
       }
@@ -451,115 +482,94 @@
     return null;
   }
 
-  // Try to resolve a just-opened tab's URL from any available source.
-  // Pending (unloaded) session-restore tabs have currentURI=about:blank; the
-  // real URL is tucked away in a few internal slots set by SessionStore.
-  function resolveOpeningUrl(tab) {
-    const u = tabUrl(tab);
-    if (u && u !== "about:blank") return u;
-    // Internal SessionStore data directly on the browser element.
-    const ssData = tab.linkedBrowser?.__SS_data;
-    if (ssData?.entries?.length) {
-      const i = Math.max(0, Math.min(ssData.entries.length - 1, (ssData.index || 1) - 1));
-      const direct = ssData.entries[i]?.url;
-      if (direct) return direct;
-    }
-    // lazyBrowserURI (set by addTrustedTab with createLazyBrowser).
-    const lazySpec = tab.linkedBrowser?.lazyBrowserURI?.spec;
-    if (lazySpec) return lazySpec;
-    // Tab label — for pending tabs without a title, Firefox uses the URL.
-    const lbl = tab.getAttribute?.("label") || tab.label || "";
-    if (/^[a-z]+:/i.test(lbl)) return lbl;
-    return u || "";
-  }
-
-  // Apply a saved-state entry to a tab's treeData and re-sync its row.
-  // Used by both the immediate onTabOpen match and the deferred match below.
+  // Apply a saved-state entry to a tab's treeData and re-sync every row.
+  // Full sweep is needed because `levelOf(tab)` derives depth from the
+  // parentId chain; when this tab's id becomes canonical (or its parentId
+  // updates), descendants' displayed levels may change.
+  //
+  // Idempotent: once a tab has received its saved state, later calls (e.g.
+  // via a spurious SSTabRestoring on activation when a stale queue entry
+  // happens to match the tab's URL) are no-ops. Prevents the focus-flatten
+  // regression where a leftover queue entry with a matching URL was
+  // applying wrong parentId over the correct one.
   function applySavedToTab(tab, prior) {
     const td = treeData(tab);
+    if (td.appliedSavedState) return;
+    td.appliedSavedState = true;
     td.id = prior.id || td.id;
-    td.level = prior.level || 0;
+    td.parentId = prior.parentId ?? null;
     td.name = prior.name || null;
     td.state = prior.state || null;
     td.collapsed = !!prior.collapsed;
     pinTabId(tab, td.id);
-    if (rowOf.get(tab)) syncTabRow(tab);
+    scheduleTreeResync();
+  }
+
+  // Debounced full-panel sync: coalesces multiple applies in one microtask.
+  let resyncPending = false;
+  function scheduleTreeResync() {
+    if (resyncPending) return;
+    resyncPending = true;
+    Promise.resolve().then(() => {
+      resyncPending = false;
+      for (const t of gBrowser.tabs) {
+        if (rowOf.get(t)) syncTabRow(t);
+      }
+      updateVisibility();
+    });
   }
 
   function onTabOpen(e) {
     const tab = e.target;
     const td = treeData(tab);
 
-    // Session-restore path: the tab matches something we saved last run.
-    // This covers pending/unloaded tabs brought back by session auto-restore
-    // or undoCloseWindow, which don't fire SSTabRestoring until activated.
-    const openUrl = resolveOpeningUrl(tab);
-    const prior = openUrl ? popSavedState(openUrl) : null;
+    // Session-restore path: match this tab to a leftover saved node. Exact
+    // URL when resolvable; positional blindspot (queue-head) for pending
+    // session-restored tabs whose URL hasn't materialized yet.
+    const prior = popSavedForTab(tab);
     if (prior) {
       applySavedToTab(tab, prior);
       const row = createTabRow(tab);
-      panel.insertBefore(row, spacer);    // append in arrival order
+      panel.insertBefore(row, spacer);
       if (pendingCursorMove) { pendingCursorMove = false; setCursor(row); }
       updateVisibility();
       scheduleSave();
       return;
     }
 
-    // URL wasn't resolvable at TabOpen time (pending/lazy session-restored
-    // tab). SessionStore populates state at various points depending on
-    // restore timing; retry a few times with increasing delay. Also retry
-    // on TabAttrModified in case Firefox mutates label/URL later.
-    if (savedTabState.size) {
-      const tryMatch = () => {
-        if (!tab.isConnected || !rowOf.get(tab)) return false;
-        const later = resolveOpeningUrl(tab);
-        console.log(`palefox-tabs: deferred match tab url=${later || "(empty)"} stateSize=${savedTabState.size}`);
-        if (!later || later === "about:blank") return false;
-        const match = popSavedState(later);
-        if (!match) return false;
-        applySavedToTab(tab, match);
-        scheduleSave();
-        return true;
-      };
-      Promise.resolve().then(tryMatch);
-      setTimeout(tryMatch, 50);
-      setTimeout(tryMatch, 250);
-      setTimeout(tryMatch, 1000);
-    }
-
-    // "root" (default) → level 0, appended at end
-    // "child"  → child of opener, or child of selected
-    // "sibling"→ sibling of opener, or sibling of selected
+    // "root" (default) → parentId null (top-level)
+    // "child"  → parentId = opener / selected (becomes child)
+    // "sibling"→ parentId = parent of (opener / selected)
     const position = Services.prefs.getCharPref("pfx.tabs.newTabPosition", "root");
     const anchor = tab.owner || (gBrowser.selectedTab !== tab ? gBrowser.selectedTab : null);
 
     if (position === "child" && anchor) {
-      td.level = treeData(anchor).level + 1;
+      td.parentId = treeData(anchor).id;
     } else if (position === "sibling" && anchor) {
-      td.level = treeData(anchor).level;
+      td.parentId = treeData(anchor).parentId;
     }
-    // "root" leaves level at 0
+    // "root" leaves parentId at null
 
+    // Create the row and align its DOM position with Firefox's tab index.
+    // For the "root" pref, also ask Firefox to put the tab at the end of the
+    // strip; the TabMove it fires re-aligns us there.
     const row = createTabRow(tab);
+    panel.insertBefore(row, spacer);
+    placeRowInFirefoxOrder(tab, row);
 
-    let ref = null;
-    if (position !== "root") {
-      // Insert after cursor if vim is active, otherwise after selected tab's row
-      ref = cursor || rowOf.get(gBrowser.selectedTab);
+    if (position === "root") {
+      const tabsArr = [...gBrowser.tabs];
+      const lastIdx = tabsArr.length - 1;
+      if (tabsArr.indexOf(tab) !== lastIdx) {
+        try { gBrowser.moveTab(tab, lastIdx); } catch {}
+      }
     }
-    if (ref) {
-      // Insert after ref's subtree
-      const st = subtreeRows(ref);
-      st[st.length - 1].after(row);
-    } else {
-      // Root mode, or no anchor: append at end of panel
-      panel.insertBefore(row, spacer);
-    }
+
     if (pendingCursorMove) {
       pendingCursorMove = false;
       setCursor(row);
     }
-    updateVisibility();
+    scheduleTreeResync();
     scheduleSave();
   }
 
@@ -573,14 +583,26 @@
       // Snapshot identity + parent before we mutate the panel, so we can restore on reopen.
       rememberClosedTab(tab, td);
 
-      // Promote orphaned children one level up
+      // Reparent direct children to the closing tab's parent (promote one level).
+      // Groups in our subtree keep their stored level decremented (transitional).
+      const closingId = td?.id;
+      const newParentId = td?.parentId ?? null;
+      const myLevel = levelOf(tab);
       let next = row.nextElementSibling;
       while (next && next !== spacer) {
-        const nd = dataOf(next);
-        if (!nd || nd.level <= td.level) break;
-        nd.level = Math.max(0, nd.level - 1);
-        if (next._tab) syncTabRow(next._tab);
-        else syncGroupRow(next);
+        if (next._tab) {
+          const ntd = treeData(next._tab);
+          if (levelOf(next._tab) <= myLevel) break;
+          if (ntd.parentId === closingId) {
+            ntd.parentId = newParentId;
+            syncTabRow(next._tab);
+          }
+        } else if (next._group) {
+          const gLv = next._group.level || 0;
+          if (gLv <= myLevel) break;
+          next._group.level = Math.max(0, gLv - 1);
+          syncGroupRow(next);
+        }
         next = next.nextElementSibling;
       }
 
@@ -592,42 +614,67 @@
     scheduleSave();
   }
 
-  // Pop the first saved-state entry matching this URL (leftover from last session).
-  function popSavedState(url) {
+  // Exact URL match (FIFO). Used when a tab's URL is resolvable.
+  function popSavedByUrl(url) {
     if (!url) return null;
-    const list = savedTabState.get(url);
-    if (!list || !list.length) return null;
-    const entry = list.shift();
-    if (!list.length) savedTabState.delete(url);
-    return entry;
+    const i = savedTabQueue.findIndex(s => s.url === url);
+    return i >= 0 ? savedTabQueue.splice(i, 1)[0] : null;
   }
 
-  // Fires when SessionStore is about to restore a tab (e.g. Ctrl+Shift+T,
-  // undoCloseWindow, late session restore). URL is committed by this point.
+  // Index-based match for pending tabs. Saved nodes carry `_origIdx` — their
+  // original position in gBrowser.tabs at save time. Firefox session-restore
+  // recreates tabs in saved order, so a tab's current index in gBrowser.tabs
+  // equals its _origIdx. Matching by index avoids the FIFO-queue race where
+  // tabs arriving out of order would consume wrong saved nodes.
+  function popSavedByIndex(idx) {
+    if (idx < 0) return null;
+    const i = savedTabQueue.findIndex(s => s._origIdx === idx);
+    return i >= 0 ? savedTabQueue.splice(i, 1)[0] : null;
+  }
+
+  // Combined helper: exact URL match when resolvable, index-based match for
+  // pending tabs (matches their position in gBrowser.tabs against saved
+  // _origIdx). This is robust to the order Firefox's session restore fires
+  // TabOpen events in — positions are authoritative, arrival timing is not.
+  function popSavedForTab(tab) {
+    const u = tabUrl(tab);
+    if (u && u !== "about:blank") {
+      return popSavedByUrl(u);
+    }
+    const idx = [...gBrowser.tabs].indexOf(tab);
+    return popSavedByIndex(idx);
+  }
+
+  // Fires when SessionStore restores a tab (activation of a lazy tab, or
+  // mid-session undoCloseTab). Two jobs here:
   //
-  // Two cases:
-  //  - Tab was closed this session → matched via closedTabs (full restore:
-  //    position relative to prev sibling, descendants re-demoted).
-  //  - Tab was saved last session but never live this session → matched via
-  //    savedTabState (partial restore: id + level + metadata, DOM position
-  //    follows session-restore order).
+  // 1. closedTabs path: if URL matches a mid-session-closed entry, full
+  //    restore with hierarchy (position + re-nest descendants).
+  //
+  // 2. Correction path: the tab's URL is now known. If savedTabQueue still
+  //    has an entry with THIS URL, that means onTabOpen's index-based
+  //    blindspot gave this tab the WRONG saved state (e.g. session-restore
+  //    arrival order differed from saved order, or an intermediate tab
+  //    shifted indices). The still-in-queue entry is the right one — swap.
   function onTabRestoring(e) {
     const tab = e.target;
     const url = tabUrl(tab);
 
     const entry = popClosedEntry(url);
     if (!entry) {
-      // Fallback: saved state from last session's tree file.
-      const prior = popSavedState(url);
-      if (prior) {
+      // Correction path — force-apply the URL-matched entry over whatever
+      // was applied earlier.
+      const correction = popSavedByUrl(url);
+      if (correction) {
         const td = treeData(tab);
-        td.id = prior.id || td.id;
-        td.level = prior.level || 0;
-        td.name = prior.name || null;
-        td.state = prior.state || null;
-        td.collapsed = !!prior.collapsed;
+        td.id = correction.id || td.id;
+        td.parentId = correction.parentId ?? null;
+        td.name = correction.name || null;
+        td.state = correction.state || null;
+        td.collapsed = !!correction.collapsed;
+        td.appliedSavedState = true;
         pinTabId(tab, td.id);
-        if (rowOf.get(tab)) syncTabRow(tab);
+        scheduleTreeResync();
         scheduleSave();
       }
       return;
@@ -640,29 +687,33 @@
     td.collapsed = entry.collapsed;
     pinTabId(tab, td.id);
 
+    // Restore parentId directly. parentOfTab() will resolve it via tabById at
+    // read time; if the original parent is gone the tab sits at root.
+    td.parentId = entry.parentId ?? null;
     const parent = tabById(entry.parentId);
-    td.level = parent ? treeData(parent).level + 1 : 0;
 
     // Move this tab's row to its restored position.
     const row = rowOf.get(tab);
     if (row) {
       placeRestoredRow(row, parent, entry.prevSiblingId);
-      syncTabRow(tab);
-      // Re-demote any contiguous ex-descendants that onTabClose had promoted.
-      // Stop at the first row that isn't a known descendant — anything moved
-      // elsewhere by the user is left alone.
+      // Re-nest any ex-direct-children that onTabClose had reparented to the
+      // grandparent. Only re-nest those currently pointing at our old parent.
+      // Anything moved elsewhere by the user is left alone.
       if (entry.descendantIds?.length) {
         const expected = new Set(entry.descendantIds);
+        const oldParentId = entry.parentId ?? null;
         let n = row.nextElementSibling;
         while (n && n !== spacer) {
           if (!n._tab) break;
-          const id = treeData(n._tab).id;
-          if (!expected.has(id)) break;
-          treeData(n._tab).level += 1;
-          syncTabRow(n._tab);
+          const ntd = treeData(n._tab);
+          if (!expected.has(ntd.id)) break;
+          if (ntd.parentId === oldParentId) {
+            ntd.parentId = td.id;
+          }
           n = n.nextElementSibling;
         }
       }
+      scheduleTreeResync();
     }
     updateVisibility();
     scheduleSave();
@@ -712,14 +763,14 @@
     if (!row) return;
 
     const parent = parentOfTab(tab);
-    const myLevel = td?.level || 0;
+    const myLevel = levelOf(tab);
 
     // Walk backwards for previous sibling.
     let prevSiblingId = null;
     let r = row.previousElementSibling;
     while (r) {
       if (r._tab) {
-        const lvl = treeData(r._tab).level;
+        const lvl = levelOf(r._tab);
         if (lvl < myLevel) break;
         if (lvl === myLevel) { prevSiblingId = treeData(r._tab).id; break; }
       }
@@ -732,7 +783,7 @@
     let n = row.nextElementSibling;
     while (n && n !== spacer) {
       if (n._tab) {
-        const lvl = treeData(n._tab).level;
+        const lvl = levelOf(n._tab);
         if (lvl <= myLevel) break;
         descendantIds.push(treeData(n._tab).id);
       }
@@ -762,7 +813,39 @@
   }
 
   function onTabAttrModified(e) { syncTabRow(e.target); }
-  function onTabMove() {}
+
+  // Move a row to the DOM position matching the tab's index in gBrowser.tabs.
+  // Returns true if the row was moved; false if already in place.
+  function placeRowInFirefoxOrder(tab, row) {
+    if (!row || !panel) return false;
+    const tabsArr = [...gBrowser.tabs];
+    const myIdx = tabsArr.indexOf(tab);
+    if (myIdx < 0) return false;
+    const prevTab = myIdx > 0 ? tabsArr[myIdx - 1] : null;
+    if (prevTab) {
+      const prevRow = rowOf.get(prevTab);
+      if (!prevRow || prevRow === row) return false;
+      const prevSubtree = subtreeRows(prevRow);
+      const anchor = prevSubtree[prevSubtree.length - 1];
+      if (anchor.nextElementSibling !== row) { anchor.after(row); return true; }
+    } else if (panel.firstChild !== row) {
+      panel.insertBefore(row, panel.firstChild); return true;
+    }
+    return false;
+  }
+
+  // Whenever Firefox reorders a tab, keep the palefox panel in sync.
+  // If palefox itself initiated the move (tab is in `movingTabs`), we still
+  // align the DOM row, but defer resync + save to the end-of-batch cleanup
+  // in executeDrop so we don't re-render during Firefox's busy animation.
+  function onTabMove(e) {
+    const tab = e.target;
+    const moved = placeRowInFirefoxOrder(tab, rowOf.get(tab));
+    if (moved && !movingTabs.has(tab)) {
+      scheduleTreeResync();
+      scheduleSave();
+    }
+  }
 
   // --- Vim cursor ---
 
@@ -784,8 +867,7 @@
     const rows = allRows();
     const idx = rows.indexOf(row);
     for (let i = idx; i >= 0; i--) {
-      const d = dataOf(rows[i]);
-      if (d && d.level === 0) return rows[i];
+      if (levelOfRow(rows[i]) === 0) return rows[i];
     }
     return row;
   }
@@ -842,8 +924,7 @@
     if (curIdx < 0) return false;
     const step = delta > 0 ? 1 : -1;
     for (let i = curIdx + step; i >= 0 && i < rows.length; i += step) {
-      const d = dataOf(rows[i]);
-      if (d && d.level === 0) {
+      if (levelOfRow(rows[i]) === 0) {
         setCursor(rows[i]);
         if (rows[i]._tab) gBrowser.selectedTab = rows[i]._tab;
         return true;
@@ -881,68 +962,80 @@
     else syncGroupRow(row);
   }
 
-  // h — indent single row only
+  // Find a tab's previous sibling (nearest preceding tab at same level with
+  // the same parent). Used for indent operations.
+  function prevSiblingTab(row) {
+    if (!row?._tab) return null;
+    const myTd = treeData(row._tab);
+    const myLevel = levelOf(row._tab);
+    let r = row.previousElementSibling;
+    while (r) {
+      if (r._tab) {
+        const lv = levelOf(r._tab);
+        if (lv < myLevel) return null;
+        if (lv === myLevel && treeData(r._tab).parentId === myTd.parentId) {
+          return r._tab;
+        }
+      }
+      r = r.previousElementSibling;
+    }
+    return null;
+  }
+
+  // Indent: reparent to the previous sibling. Under parentId model, indenting
+  // a row implicitly shifts its whole subtree (level is derived). We re-sync
+  // the subtree rows so indentation padding updates visually.
   function indentRow(row) {
-    const rows = allRows();
-    const i = rows.indexOf(row);
-    if (i <= 0) return;
-    const d = dataOf(row);
-    const prevD = dataOf(rows[i - 1]);
-    if (!d || !prevD || d.level > prevD.level) return;
-    d.level++;
-    syncAnyRow(row);
-    updateVisibility();
-    scheduleSave();
-  }
-
-  // Ctrl+l — indent row + entire subtree
-  function indentSubtree(row) {
-    const rows = allRows();
-    const i = rows.indexOf(row);
-    if (i <= 0) return;
-    const d = dataOf(row);
-    const prevD = dataOf(rows[i - 1]);
-    if (!d || !prevD || d.level > prevD.level) return;
-    for (const r of subtreeRows(row)) {
-      dataOf(r).level++;
-      syncAnyRow(r);
+    if (row._group) {
+      // Groups still use stored level (step 6 will parentId-ify groups).
+      const rows = allRows();
+      const i = rows.indexOf(row);
+      if (i <= 0) return;
+      const d = row._group;
+      const prevLv = levelOfRow(rows[i - 1]);
+      if (d.level > prevLv) return;
+      d.level++;
+      syncAnyRow(row);
+    } else if (row._tab) {
+      const prev = prevSiblingTab(row);
+      if (!prev) return;
+      treeData(row._tab).parentId = treeData(prev).id;
+      for (const r of subtreeRows(row)) syncAnyRow(r);
     }
     updateVisibility();
     scheduleSave();
   }
+  // Subtree variant is the same under parentId (descendants follow).
+  const indentSubtree = indentRow;
 
-  // h — outdent single row only
+  // Outdent: reparent to grandparent. Subtree follows.
   function outdentRow(row) {
-    const d = dataOf(row);
-    if (!d || d.level <= 0) return;
-    d.level = Math.max(0, d.level - 1);
-    syncAnyRow(row);
-    updateVisibility();
-    scheduleSave();
-  }
-
-  // Ctrl+h — outdent row + entire subtree
-  function outdentSubtree(row) {
-    const d = dataOf(row);
-    if (!d || d.level <= 0) return;
-    for (const r of subtreeRows(row)) {
-      dataOf(r).level = Math.max(0, dataOf(r).level - 1);
-      syncAnyRow(r);
+    if (row._group) {
+      const d = row._group;
+      if ((d.level || 0) <= 0) return;
+      d.level = Math.max(0, d.level - 1);
+      syncAnyRow(row);
+    } else if (row._tab) {
+      const td = treeData(row._tab);
+      if (!td.parentId) return;
+      const parent = tabById(td.parentId);
+      td.parentId = parent ? treeData(parent).parentId : null;
+      for (const r of subtreeRows(row)) syncAnyRow(r);
     }
     updateVisibility();
     scheduleSave();
   }
+  const outdentSubtree = outdentRow;
 
   // Alt+j — swap with next sibling at same level
   function swapDown(row) {
-    const d = dataOf(row);
-    if (!d) return;
+    if (!dataOf(row)) return;
+    const myLevel = levelOfRow(row);
     const rows = subtreeRows(row);
     const lastRow = rows[rows.length - 1];
     const nextRow = lastRow.nextElementSibling;
     if (!nextRow || nextRow === spacer) return;
-    const nd = dataOf(nextRow);
-    if (!nd || nd.level !== d.level) return;
+    if (levelOfRow(nextRow) !== myLevel) return;
 
     subtreeRows(nextRow).at(-1).after(...rows);
     updateVisibility();
@@ -951,13 +1044,13 @@
 
   // Alt+k — swap with previous sibling at same level
   function swapUp(row) {
-    const d = dataOf(row);
-    if (!d) return;
+    if (!dataOf(row)) return;
+    const myLevel = levelOfRow(row);
     let prev = row.previousElementSibling;
-    while (prev && dataOf(prev)?.level > d.level) {
+    while (prev && levelOfRow(prev) > myLevel) {
       prev = prev.previousElementSibling;
     }
-    if (!prev || dataOf(prev)?.level !== d.level) return;
+    if (!prev || levelOfRow(prev) !== myLevel) return;
 
     prev.before(...subtreeRows(row));
     updateVisibility();
@@ -1348,15 +1441,19 @@
     if (cursor._tab) {
       gBrowser.removeTab(cursor._tab);
     } else if (cursor._group) {
-      // Close group: remove group row, promote children
+      // Close group: remove group row. Descendants' displayed levels are
+      // derived from their parentId chain, so tabs don't need adjustment.
+      // Nested groups in the subtree (which still use stored level) do.
       const d = cursor._group;
+      const myLevel = d.level || 0;
       let next = cursor.nextElementSibling;
       while (next && next !== spacer) {
-        const nd = dataOf(next);
-        if (!nd || nd.level <= d.level) break;
-        nd.level = Math.max(0, nd.level - 1);
-        if (next._tab) syncTabRow(next._tab);
-        else syncGroupRow(next);
+        const lv = levelOfRow(next);
+        if (lv <= myLevel) break;
+        if (next._group) {
+          next._group.level = Math.max(0, (next._group.level || 0) - 1);
+          syncGroupRow(next);
+        }
         next = next.nextElementSibling;
       }
       const dying = cursor;
@@ -1412,8 +1509,7 @@
       case "grp":
       case "folder": {
         const label = args.slice(1).join(" ") || "New Group";
-        const d = cursor ? dataOf(cursor) : null;
-        const row = createGroupRow(label, d?.level || 0);
+        const row = createGroupRow(label, cursor ? levelOfRow(cursor) : 0);
         if (cursor) {
           // Insert after cursor's subtree
           const st = subtreeRows(cursor);
@@ -1536,16 +1632,15 @@
     if (position === "child") {
       dropIndicator.setAttribute("pfx-drop-child", "true");
       targetRow.after(dropIndicator);
-      const d = dataOf(targetRow);
-      dropIndicator.style.marginInlineStart = ((d ? d.level + 1 : 1) * INDENT + 8) + "px";
+      dropIndicator.style.marginInlineStart = ((levelOfRow(targetRow) + 1) * INDENT + 8) + "px";
     } else if (position === "before") {
       targetRow.before(dropIndicator);
-      dropIndicator.style.marginInlineStart = (dataOf(targetRow)?.level * INDENT + 8) + "px";
+      dropIndicator.style.marginInlineStart = (levelOfRow(targetRow) * INDENT + 8) + "px";
     } else {
       // after — insert after the target's subtree
       const st = subtreeRows(targetRow);
       st[st.length - 1].after(dropIndicator);
-      dropIndicator.style.marginInlineStart = (dataOf(targetRow)?.level * INDENT + 8) + "px";
+      dropIndicator.style.marginInlineStart = (levelOfRow(targetRow) * INDENT + 8) + "px";
     }
   }
 
@@ -1556,49 +1651,110 @@
   }
 
   function executeDrop(srcRow, tgtRow, position) {
-    const tgtData = dataOf(tgtRow);
-    if (!tgtData) return;
+    const tgtLevel = levelOfRow(tgtRow);
+    if (!dataOf(tgtRow)) return;
 
     // Collect rows to move: multi-select or single subtree
     let movedRows;
     if (selection.size > 1 && selection.has(srcRow)) {
-      // Gather selected rows in visual order
       movedRows = allRows().filter(r => selection.has(r));
     } else {
       movedRows = subtreeRows(srcRow);
     }
     if (!movedRows.length) return;
 
-    const firstData = dataOf(movedRows[0]);
-    if (!firstData) return;
+    const srcLevel = levelOfRow(movedRows[0]);
+    const newSrcLevel = position === "child" ? tgtLevel + 1 : tgtLevel;
+    const delta = newSrcLevel - srcLevel;
 
-    const newLevel = position === "child" ? tgtData.level + 1 : tgtData.level;
-    const delta = newLevel - firstData.level;
+    // Source's new parent: tgt itself (child) or tgt's parent (before/after).
+    const newParentForSource = position === "child"
+      ? (tgtRow._tab ? treeData(tgtRow._tab).id : null)
+      : (tgtRow._tab ? treeData(tgtRow._tab).parentId : null);
 
+    // Update parentId for top-level moved tabs; descendants keep their
+    // existing parentId pointers (they follow the source in the subtree).
+    const movedSet = new Set(movedRows);
     for (const r of movedRows) {
-      dataOf(r).level += delta;
+      if (!r._tab) {
+        if (r._group) r._group.level = Math.max(0, (r._group.level || 0) + delta);
+        continue;
+      }
+      const td = treeData(r._tab);
+      const parent = tabById(td.parentId);
+      if (!parent || !movedSet.has(rowOf.get(parent))) {
+        td.parentId = newParentForSource;
+      }
     }
 
-    // Move DOM nodes
+    // Move Firefox tabs via gBrowser.moveTab so our panel and Firefox's tab
+    // strip stay aligned. TabMove handlers reorder palefox rows in response.
+    // Groups have no Firefox counterpart; we move them via DOM below.
+    const movedTabs = movedRows.filter(r => r._tab).map(r => r._tab);
+    const tabsArr = [...gBrowser.tabs];
+
+    // Compute target index in Firefox's tab list.
+    let targetIdx;
     if (position === "before") {
-      tgtRow.before(...movedRows);
+      targetIdx = tabsArr.indexOf(tgtRow._tab);
     } else {
-      const st = subtreeRows(tgtRow);
-      const anchor = st.filter(r => !movedRows.includes(r));
-      (anchor.length ? anchor[anchor.length - 1] : tgtRow).after(...movedRows);
+      // "child" and "after": insert right after tgt's subtree's last Firefox tab.
+      const tgtSubtreeTab = [...subtreeRows(tgtRow)].reverse().find(r => r._tab)?._tab;
+      targetIdx = (tgtSubtreeTab ? tabsArr.indexOf(tgtSubtreeTab) : tabsArr.indexOf(tgtRow._tab)) + 1;
+    }
+    if (targetIdx < 0) targetIdx = tabsArr.length;
+
+    // Mark every tab we're about to move so TabMove handlers and syncTabRow
+    // skip busy-sync / tree-resync while Firefox's move animation runs.
+    // One final clean resync happens below after all moves settle.
+    for (const t of movedTabs) movingTabs.add(t);
+
+    // gBrowser.moveTab each moved tab, adjusting indices as we go so the
+    // group lands contiguously in the right spot.
+    let insertIdx = targetIdx;
+    for (const t of movedTabs) {
+      const currentIdx = [...gBrowser.tabs].indexOf(t);
+      if (currentIdx < 0) continue;
+      if (currentIdx < insertIdx) insertIdx--;
+      if (currentIdx !== insertIdx) gBrowser.moveTab(t, insertIdx);
+      insertIdx++;
     }
 
-    for (const r of movedRows) syncAnyRow(r);
+    // Move any groups in the selection via DOM (no Firefox counterpart).
+    const groupRows = movedRows.filter(r => r._group);
+    if (groupRows.length) {
+      if (position === "before") {
+        tgtRow.before(...groupRows);
+      } else {
+        const st = subtreeRows(tgtRow);
+        const anchor = st.filter(r => !movedRows.includes(r));
+        (anchor.length ? anchor[anchor.length - 1] : tgtRow).after(...groupRows);
+      }
+    }
+
     clearSelection();
-    updateVisibility();
-    scheduleSave();
+
+    // After the browser has had a frame to settle its move animation (and
+    // any transient `busy` attributes), clear the moving set and do one
+    // clean resync + save. requestAnimationFrame is cheap and reliable.
+    requestAnimationFrame(() => {
+      for (const t of movedTabs) movingTabs.delete(t);
+      // Also explicitly clear any lingering `busy` attribute on our rows
+      // (Firefox may have cleared it on the tab but TabAttrModified for
+      // the back-to-back toggle is unreliable for pending/lazy tabs).
+      for (const t of movedTabs) {
+        const row = rowOf.get(t);
+        if (row) row.toggleAttribute("busy", t.hasAttribute("busy"));
+      }
+      scheduleTreeResync();
+      scheduleSave();
+    });
   }
 
   function cloneAsChild(tab) {
     const parentRow = rowOf.get(tab);
     if (!parentRow) return;
-    const parentData = treeData(tab);
-    const childLevel = parentData.level + 1;
+    const parentId = treeData(tab).id;
 
     pendingCursorMove = true;
     const clone = gBrowser.duplicateTab(tab);
@@ -1608,7 +1764,7 @@
       const cloneRow = rowOf.get(clone);
       if (!cloneRow) return;
       obs.disconnect();
-      treeData(clone).level = childLevel;
+      treeData(clone).parentId = parentId;
 
       // Insert after parent's subtree
       const st = subtreeRows(parentRow);
@@ -1630,8 +1786,7 @@
 
   function newGroupAbove() {
     if (!cursor) return;
-    const d = dataOf(cursor);
-    const row = createGroupRow("New Group", d?.level || 0);
+    const row = createGroupRow("New Group", levelOfRow(cursor));
     cursor.before(row);
     setCursor(row);
     updateVisibility();
@@ -1652,10 +1807,17 @@
     const tgtData = dataOf(target);
     if (!srcData || !tgtData) return;
 
-    // Calculate level delta: source becomes child of target
-    const delta = (tgtData.level + 1) - srcData.level;
-    for (const r of srcRows) {
-      dataOf(r).level += delta;
+    // Source becomes child of target.
+    if (refileSource._tab && target._tab) {
+      treeData(refileSource._tab).parentId = treeData(target._tab).id;
+    } else {
+      // Mixed (group involved): fall back to level delta on rows in subtree.
+      const tgtLevel = levelOfRow(target);
+      const srcLevel = levelOfRow(refileSource);
+      const delta = (tgtLevel + 1) - srcLevel;
+      for (const r of srcRows) {
+        if (r._group) r._group.level = Math.max(0, (r._group.level || 0) + delta);
+      }
     }
 
     // Move after target's subtree
@@ -1809,15 +1971,15 @@
 
     // Also mark ancestors of matched rows (preserve tree context)
     for (const row of [...matched]) {
-      let lv = dataOf(row).level;
+      let lv = levelOfRow(row);
       let prev = row.previousElementSibling;
       while (prev) {
-        const pd = dataOf(prev);
-        if (pd && pd.level < lv) {
+        const plv = levelOfRow(prev);
+        if (plv < lv) {
           matched.add(prev);
-          lv = pd.level;
+          lv = plv;
         }
-        if (pd && pd.level === 0) break;
+        if (plv === 0) break;
         prev = prev.previousElementSibling;
       }
     }
@@ -1860,8 +2022,7 @@
       if (!contextTab) return;
       const row = rowOf.get(contextTab);
       if (!row) return;
-      const d = dataOf(row);
-      const grp = createGroupRow("New Group", d?.level || 0);
+      const grp = createGroupRow("New Group", levelOfRow(row));
       // Insert after this row's subtree
       const st = subtreeRows(row);
       st[st.length - 1].after(grp);
@@ -1970,28 +2131,48 @@
   }
 
   async function writeToDisk() {
-    const out = allRows().map((row) => {
-      const d = dataOf(row);
-      if (!d) return null;
-      if (row._group) {
-        return { type: "group", name: d.name, level: d.level,
-                 state: d.state, collapsed: d.collapsed };
-      }
+    // Tabs saved in Firefox's canonical tab order so positional matching
+    // at load time is unambiguous. Groups are anchored by afterTabId —
+    // "insert this group right after the tab with this id."
+    const tabsArr = [...gBrowser.tabs];
+    const tabEntries = tabsArr.map((tab) => {
+      const d = treeData(tab);
       return {
         type: "tab",
         id: d.id,
-        url: tabUrl(row._tab),
-        level: d.level, name: d.name,
-        state: d.state, collapsed: d.collapsed,
+        parentId: d.parentId ?? null,
+        url: tabUrl(tab),
+        name: d.name,
+        state: d.state,
+        collapsed: d.collapsed,
       };
-    }).filter(Boolean);
+    });
 
-    // Preserve unconsumed saved-state entries (tabs saved last session that
-    // haven't been brought back yet). Otherwise periodic saves during a
-    // nearly-empty session would clobber them before SSTabRestoring can claim.
-    for (const [, list] of savedTabState) {
-      for (const s of list) out.push({ ...s, type: "tab" });
+    // Walk the panel in DOM order to capture group positions. Each group is
+    // anchored to the most-recent preceding tab (null = at top of panel).
+    const groupEntries = [];
+    let lastSeenTabId = null;
+    for (const row of allRows()) {
+      if (row._tab) {
+        lastSeenTabId = treeData(row._tab).id;
+      } else if (row._group) {
+        groupEntries.push({
+          type: "group",
+          name: row._group.name,
+          level: row._group.level,
+          state: row._group.state,
+          collapsed: row._group.collapsed,
+          afterTabId: lastSeenTabId,
+        });
+      }
     }
+
+    // Preserve unconsumed saved-state entries (tabs we expected but haven't
+    // seen this session yet) so periodic saves during a blank window don't
+    // clobber them before the real window is restored.
+    const leftovers = savedTabQueue.map(s => ({ ...s, type: "tab" }));
+
+    const out = [...tabEntries, ...groupEntries, ...leftovers];
 
     try {
       const path = PathUtils.join(
@@ -2031,74 +2212,81 @@
       }
 
       const tabs = allTabs();
-      const used = new Set();
+      const tabNodes = saved.nodes.filter(n => n.type === "tab");
 
-      // Reviver: apply saved tree data (preserving id) to a live tab.
+      // Legacy-format migration: if tab nodes have `level` but no `parentId`,
+      // derive parentId from level+order via a stack walk.
+      {
+        const stack = [];
+        for (const n of tabNodes) {
+          const lv = n.level || 0;
+          while (stack.length && stack[stack.length - 1].level >= lv) stack.pop();
+          if (n.parentId === undefined) {
+            n.parentId = stack.length ? stack[stack.length - 1].id : null;
+          }
+          if (n.id) stack.push({ level: lv, id: n.id });
+        }
+      }
+
       const applied = new Set();
       const apply = (tab, s, i) => {
         const id = s.id || nextTabId++;
         treeOf.set(tab, {
-          id, level: s.level || 0, name: s.name || null,
-          state: s.state || null, collapsed: !!s.collapsed,
+          id,
+          parentId: s.parentId ?? null,
+          name: s.name || null,
+          state: s.state || null,
+          collapsed: !!s.collapsed,
         });
         pinTabId(tab, id);
         applied.add(i);
       };
 
-      const tabNodes = saved.nodes.filter(n => n.type === "tab");
-
-      // 1. Primary: match by SessionStore-pinned id. Exact, survives session
-      //    restore including lazy/pending tabs (no URL comparison needed).
-      tabs.forEach((tab, i) => {
-        if (used.has(i)) return;
-        const pid = readPinnedId(tab);
-        if (!pid) return;
-        const j = tabNodes.findIndex((s, k) => !applied.has(k) && s.id === pid);
-        if (j >= 0) {
-          apply(tab, tabNodes[j], j);
-          used.add(i);
+      // Sidebery-style positional blindspot match. Walk live tabs and saved
+      // nodes pairwise. For each pair: accept if URLs agree OR live tab is
+      // pending (about:blank, hasn't loaded yet). Pending tabs always match
+      // by position — Firefox restores in saved order, so positions agree
+      // even when URLs haven't resolved yet. On URL mismatch with a live
+      // URL present, scan ±5 live tabs for a URL match (user opened extras).
+      let li = 0;
+      for (let ni = 0; ni < tabNodes.length; ni++) {
+        if (li >= tabs.length) break;
+        const s = tabNodes[ni];
+        const live = tabs[li];
+        const liveUrl = live.linkedBrowser?.currentURI?.spec || "";
+        const pending = liveUrl === "about:blank";
+        if (liveUrl === s.url || pending) {
+          apply(live, s, ni);
+          li++;
+          continue;
         }
-      });
-
-      // 2. Fallback: URL matching (position-first, then by URL). Covers first
-      //    run after upgrade, and tabs opened outside palefox.
-      const liveUrls = tabs.map(tabUrl);
-      tabNodes.forEach((s, i) => {
-        if (applied.has(i)) return;
-        if (i < tabs.length && !used.has(i) && liveUrls[i] === s.url) {
-          apply(tabs[i], s, i);
-          used.add(i);
+        // ±5 lookahead for a direct URL match
+        let off = 0;
+        for (let j = 1; j <= 5 && li + j < tabs.length; j++) {
+          const u = tabs[li + j].linkedBrowser?.currentURI?.spec || "";
+          if (u === s.url) { off = j; break; }
         }
-      });
-      tabNodes.forEach((s, i) => {
-        if (applied.has(i)) return;
-        const j = liveUrls.findIndex((u, k) => !used.has(k) && u === s.url);
-        if (j >= 0) {
-          apply(tabs[j], s, i);
-          used.add(j);
-        }
-      });
+        if (off) { apply(tabs[li + off], s, ni); li += off + 1; }
+        // else: saved node has no live counterpart yet — falls into savedTabState
+      }
 
-      // Diagnostic: how much of the saved tree did we manage to pin to live tabs?
       console.log(
         `palefox-tabs: loaded ${tabNodes.length} saved tab nodes, ` +
-        `matched ${applied.size} to live tabs (of ${tabs.length}). ` +
-        `Sample live URL[0]="${liveUrls[0] || ""}", ` +
-        `saved URL[0]="${tabNodes[0]?.url || ""}".`
+        `matched ${applied.size} to live tabs (of ${tabs.length}).`
       );
 
-      // Leftover nodes — tabs saved last session but not live right now.
-      // Keyed by URL so SSTabRestoring can pick them up if the session/window
-      // gets restored later (e.g. via undoCloseWindow).
-      savedTabState.clear();
+      // Leftover nodes (no live match at init). Stash each node's original
+      // index in gBrowser.tabs (= its position in the saved tabNodes list,
+      // since we serialize in gBrowser.tabs order). Later-arriving session-
+      // restore tabs match by their current gBrowser.tabs index.
+      savedTabQueue.length = 0;
       tabNodes.forEach((s, i) => {
         if (applied.has(i)) return;
-        const list = savedTabState.get(s.url) || [];
-        list.push(s);
-        savedTabState.set(s.url, list);
+        s._origIdx = i;
+        savedTabQueue.push(s);
       });
 
-      // Store full node list for buildPanel to reconstruct groups + order
+      // Full node list drives buildFromSaved for groups + order.
       loadedNodes = saved.nodes;
     } catch (e) {
       console.error("palefox-tabs: loadFromDisk parse/apply error", e);
@@ -2107,46 +2295,46 @@
 
   let loadedNodes = null;
 
-  // Build panel from saved node list (preserving groups + visual order)
+  // Build the panel from gBrowser.tabs (canonical order). Interleave groups
+  // at their saved afterTabId anchors. Unanchored groups go to the top.
   function buildFromSaved() {
     if (!loadedNodes || !panel) return false;
-    const tabs = allTabs();
-    const usedTabs = new Set();
+
+    const groupNodes = loadedNodes.filter(n => n.type === "group");
+
+    // Bucket groups by their anchor tab id. `null` = "top of panel."
+    const leadingGroups = [];
+    const groupsAfter = new Map();
+    for (const g of groupNodes) {
+      if (g.afterTabId == null) leadingGroups.push(g);
+      else {
+        const arr = groupsAfter.get(g.afterTabId) || [];
+        arr.push(g);
+        groupsAfter.set(g.afterTabId, arr);
+      }
+    }
+
+    const mkGroup = (g) => {
+      const row = createGroupRow(g.name, g.level || 0);
+      row._group.state = g.state || null;
+      row._group.collapsed = !!g.collapsed;
+      syncGroupRow(row);
+      return row;
+    };
 
     while (panel.firstChild !== spacer) panel.firstChild.remove();
 
-    // Build id + URL lookup tables for matching saved nodes to live tabs.
-    // Id matching (from SessionStore-pinned values) is primary; URL is fallback.
-    const liveIds = tabs.map(readPinnedId);
-    const liveUrls = tabs.map(tabUrl);
-    for (const node of loadedNodes) {
-      if (node.type === "group") {
-        const row = createGroupRow(node.name, node.level || 0);
-        row._group.state = node.state || null;
-        row._group.collapsed = !!node.collapsed;
-        syncGroupRow(row);
-        panel.insertBefore(row, spacer);
-      } else {
-        let i = -1;
-        if (node.id) {
-          i = liveIds.findIndex((id, k) => !usedTabs.has(k) && id && id === node.id);
-        }
-        if (i < 0) {
-          i = liveUrls.findIndex((u, k) => !usedTabs.has(k) && u === node.url);
-        }
-        if (i >= 0) {
-          usedTabs.add(i);
-          panel.insertBefore(createTabRow(tabs[i]), spacer);
-        }
-      }
+    for (const g of leadingGroups) panel.insertBefore(mkGroup(g), spacer);
+
+    for (const tab of gBrowser.tabs) {
+      panel.insertBefore(createTabRow(tab), spacer);
+      const tid = treeData(tab).id;
+      const groups = groupsAfter.get(tid);
+      if (groups) for (const g of groups) panel.insertBefore(mkGroup(g), spacer);
     }
-    // Add any tabs not in saved data (new tabs since last save)
-    for (let i = 0; i < tabs.length; i++) {
-      if (!usedTabs.has(i)) {
-        panel.insertBefore(createTabRow(tabs[i]), spacer);
-      }
-    }
+
     loadedNodes = null;
+    scheduleTreeResync();
     updateVisibility();
     return true;
   }
