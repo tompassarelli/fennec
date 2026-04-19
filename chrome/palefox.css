@@ -947,7 +947,10 @@ body:has(#sidebar-box[hidden]):has(#identity-box.notSecure)::before {
   position: absolute;
   bottom: 8px;
   right: 16px;
-  width: 320px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  contain: none !important;
+  overflow-x: visible !important;
   padding: 4px 8px !important;
   background: var(--pfx-color) !important;
   border: 1px solid color-mix(in srgb, currentColor, transparent 87%) !important;
@@ -970,10 +973,6 @@ body:has(#sidebar-box[hidden]):has(#identity-box.notSecure)::before {
 }
 
 .browserContainer > findbar .findbar-closebutton {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  right: 12px;
   margin: 0 !important;
   padding: 4px !important;
 }
