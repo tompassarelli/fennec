@@ -675,12 +675,21 @@
             vertical ? "Horizontal Tabs" : "Vertical Tabs"
           );
 
-          const isExpanded = sidebarMain.hasAttribute(
-            "sidebar-launcher-expanded"
-          );
+          // Ground-truth check: is the sidebar actually rendered? The
+          // sidebar-launcher-expanded attribute tracks the vertical-tabs
+          // drawer state, but in horizontal mode visibility is governed
+          // by different Firefox mechanisms — checking hidden + width
+          // works across both.
+          const sidebarActive = vertical
+            ? sidebarMain.hasAttribute("sidebar-launcher-expanded")
+            : (!sidebarMain.hidden
+               && sidebarMain.getBoundingClientRect().width > 0);
+          const labels = vertical
+            ? { on: "Collapse Layout", off: "Expand Layout" }
+            : { on: "Disable Sidebar", off: "Enable Sidebar" };
           collapseItem.setAttribute(
             "label",
-            (isExpanded || !vertical) ? "Collapse Layout" : "Expand Layout"
+            sidebarActive ? labels.on : labels.off
           );
         }
       });
