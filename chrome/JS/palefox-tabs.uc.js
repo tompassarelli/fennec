@@ -396,6 +396,7 @@
     if (!isHorizontal() || !panel) return;
     let col = 0;
     let rowInCol = 0;
+    let selectedCol = 0;
     for (const row of allRows()) {
       const d = dataOf(row);
       if (!d) continue;
@@ -411,6 +412,20 @@
       row.style.gridColumn = String(col);
       row.style.gridRow = String(rowInCol);
       row.toggleAttribute("pfx-popout-child", rowInCol > 1);
+      if (row.hasAttribute("selected")) selectedCol = col;
+    }
+    // Give the selected tab's column a 200px floor while other columns
+    // continue to shrink as more tabs arrive. grid-auto-columns sizes all
+    // columns uniformly, so we build explicit grid-template-columns per
+    // column count.
+    if (col > 0) {
+      const tracks = [];
+      for (let i = 1; i <= col; i++) {
+        tracks.push(i === selectedCol ? "minmax(200px, 200px)" : "minmax(0, 200px)");
+      }
+      panel.style.gridTemplateColumns = tracks.join(" ");
+    } else {
+      panel.style.gridTemplateColumns = "";
     }
     // Pin panel height to first row so children overlay instead of expanding
     requestAnimationFrame(() => {
@@ -809,7 +824,8 @@
       if (row) row.toggleAttribute("selected", tab.selected);
     }
     const row = rowOf.get(gBrowser.selectedTab);
-    if (row && !cursor) row.scrollIntoView({ block: "nearest" });
+    if (row && !cursor) row.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (isHorizontal()) updateHorizontalGrid();
   }
 
   function onTabAttrModified(e) { syncTabRow(e.target); }
@@ -872,6 +888,26 @@
     return row;
   }
 
+  // Firefox sets popover="manual" on #urlbar so it lives in the CSS top
+  // layer. That makes it render above everything in horizontal mode,
+  // including tree popouts. We can't beat top layer with z-index — the
+  // only fix is to pull the urlbar *out* of top layer while the popout
+  // is visible, then restore it on collapse. Tree collapse runs before
+  // the user can move to the urlbar, so focus behaviour (breakout-extend
+  // positioning) is unaffected in practice.
+  function setUrlbarTopLayer(inTopLayer) {
+    const urlbar = document.getElementById("urlbar");
+    if (!urlbar) return;
+    // palefox-drawer owns popover state when compact mode is active
+    if (sidebarMain.hasAttribute("data-pfx-compact")) return;
+    if (inTopLayer && !urlbar.hasAttribute("popover")) {
+      urlbar.setAttribute("popover", "manual");
+      try { urlbar.showPopover(); } catch (_) {}
+    } else if (!inTopLayer && urlbar.hasAttribute("popover")) {
+      urlbar.removeAttribute("popover");
+    }
+  }
+
   // Auto-expand the cursor's tree, collapse the previous one.
   // On collapse, the root shows the last selected tab's visuals.
   function collapseHzTree(root) {
@@ -888,6 +924,7 @@
 
     d.collapsed = true;
     syncAnyRow(root);
+    if (isHorizontal()) setUrlbarTopLayer(true);
   }
 
   function expandHzTree(root) {
@@ -899,6 +936,7 @@
 
     d.collapsed = false;
     syncAnyRow(root);
+    if (isHorizontal()) setUrlbarTopLayer(false);
   }
 
   function updateHorizontalExpansion() {
@@ -2560,17 +2598,21 @@
       :root[pfx-horizontal-tabs] #TabsToolbar {
         position: relative;
         z-index: 100;
-        margin-bottom: 6px;
-        bottom: 2px;
+        margin-top: 6px;
       }
 
       #pfx-tab-panel[pfx-horizontal] {
         display: grid !important;
-        grid-auto-columns: minmax(100px, 200px);
+        /* No min — columns shrink infinitely small as more tabs arrive,
+         * rather than scrolling offscreen. */
+        grid-auto-columns: minmax(0, 200px);
         grid-auto-rows: auto;
         justify-content: start;
         align-content: start;
-        flex: none !important;
+        /* Fill the toolbar's available width so columns distribute
+         * within the container instead of overflowing. */
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
         min-height: unset !important;
         overflow: visible !important;
         z-index: 2;
@@ -2579,12 +2621,29 @@
       #pfx-tab-panel[pfx-horizontal] .pfx-tab-row,
       #pfx-tab-panel[pfx-horizontal] .pfx-group-row {
         margin: 1px;
+        position: relative;
+      }
+      /* Horizontal mode: close button anchors to the right edge and sits
+       * above the label via z-index. When the tab is narrow, it overlaps
+       * the truncated label rather than falling off the right edge. */
+      #pfx-tab-panel[pfx-horizontal] .pfx-tab-close {
+        position: absolute;
+        right: 6px;
+        top: 50%;
+        transform: translateY(-50%);
+        margin-inline-start: 0;
+        z-index: 1;
+        background: inherit;
+        border-radius: 3px;
+        padding: 1px;
       }
 
       /* Popout children — background so they're readable over content */
       #pfx-tab-panel[pfx-horizontal] [pfx-popout-child] {
         background: var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22));
         z-index: 3;
+        margin-top: 0;
+        margin-bottom: 0;
       }
       /* Shadow on the last child in each popout column */
       #pfx-tab-panel[pfx-horizontal] [pfx-popout-child]:not(:has(+ [pfx-popout-child])) {
@@ -2605,20 +2664,6 @@
   }
 
   let toolboxResizeObs = null;
-
-  // In horizontal-tabs mode, put #nav-bar (urlbar) above #TabsToolbar.
-  // Native order is TabsToolbar → nav-bar; we want the reverse so the urlbar
-  // sits at the top of the chrome. No restore needed — when the user switches
-  // back to vertical, #TabsToolbar is hidden entirely via CSS so its DOM
-  // position no longer affects layout.
-  function reorderHorizontalToolbars() {
-    const tabsToolbar = document.getElementById("TabsToolbar");
-    const navBar = document.getElementById("nav-bar");
-    if (!tabsToolbar || !navBar) return;
-    if (tabsToolbar.parentNode !== navBar.parentNode) return;
-    if (navBar.nextElementSibling === tabsToolbar) return; // already ordered
-    navBar.after(tabsToolbar);
-  }
 
   // Content-alignment spacer: in horizontal mode the tab strip starts at the
   // window's left edge. Inset it by 10px so tabs don't butt against the edge.
@@ -2661,13 +2706,14 @@
         sidebarMain.prepend(panel);
       }
       teardownHorizontalAlignSpacer();
+      // If horizontal mode had a popout open, urlbar may be without popover
+      setUrlbarTopLayer(true);
     } else {
       panel.removeAttribute("pfx-icons-only");
       const tabbrowserTabs = document.getElementById("tabbrowser-tabs");
       if (tabbrowserTabs && tabbrowserTabs.nextElementSibling !== panel) {
         tabbrowserTabs.after(panel);
       }
-      reorderHorizontalToolbars();
       setupHorizontalAlignSpacer();
     }
 
