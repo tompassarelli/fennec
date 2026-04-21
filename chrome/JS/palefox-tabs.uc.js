@@ -2583,7 +2583,7 @@
 
       /* Popout children — background so they're readable over content */
       #pfx-tab-panel[pfx-horizontal] [pfx-popout-child] {
-        background: var(--toolbar-bgcolor, var(--sidebar-background-color));
+        background: var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22));
         z-index: 3;
       }
       /* Shadow on the last child in each popout column */

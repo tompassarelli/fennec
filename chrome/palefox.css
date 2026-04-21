@@ -45,7 +45,7 @@
 #sidebar-main {
   overflow: visible !important;
   flex-direction: column !important;
-  background-color: var(--sidebar-background-color, var(--toolbar-bgcolor)) !important;
+  background-color: var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22)) !important;
 }
 
 #sidebar-main > sidebar-main {
@@ -62,7 +62,7 @@
 
 #navigator-toolbox {
   flex: none !important;
-  background-color: var(--sidebar-background-color, var(--toolbar-bgcolor)) !important;
+  background-color: var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22)) !important;
   position: relative !important;
   z-index: 3 !important;
 }
@@ -190,7 +190,7 @@ Preserve these (security warnings):
   width: 100%;
   height: 46px;
   box-sizing: border-box;
-  background-color: var(--sidebar-background-color, var(--toolbar-bgcolor));
+  background-color: var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22));
 }
 
 /* #endregion urlbar */
