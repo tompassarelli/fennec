@@ -2560,7 +2560,8 @@
       :root[pfx-horizontal-tabs] #TabsToolbar {
         position: relative;
         z-index: 100;
-        margin-top: 6px;
+        margin-bottom: 6px;
+        bottom: 2px;
       }
 
       #pfx-tab-panel[pfx-horizontal] {
@@ -2573,7 +2574,6 @@
         min-height: unset !important;
         overflow: visible !important;
         z-index: 2;
-        padding: 0 12px;
       }
 
       #pfx-tab-panel[pfx-horizontal] .pfx-tab-row,
@@ -2606,6 +2606,38 @@
 
   let toolboxResizeObs = null;
 
+  // In horizontal-tabs mode, put #nav-bar (urlbar) above #TabsToolbar.
+  // Native order is TabsToolbar → nav-bar; we want the reverse so the urlbar
+  // sits at the top of the chrome. No restore needed — when the user switches
+  // back to vertical, #TabsToolbar is hidden entirely via CSS so its DOM
+  // position no longer affects layout.
+  function reorderHorizontalToolbars() {
+    const tabsToolbar = document.getElementById("TabsToolbar");
+    const navBar = document.getElementById("nav-bar");
+    if (!tabsToolbar || !navBar) return;
+    if (tabsToolbar.parentNode !== navBar.parentNode) return;
+    if (navBar.nextElementSibling === tabsToolbar) return; // already ordered
+    navBar.after(tabsToolbar);
+  }
+
+  // Content-alignment spacer: in horizontal mode the tab strip starts at the
+  // window's left edge. Inset it by 10px so tabs don't butt against the edge.
+  let alignSpacer = null;
+  function setupHorizontalAlignSpacer() {
+    const target = document.getElementById("TabsToolbar-customization-target");
+    if (!target) return;
+    if (!alignSpacer) {
+      alignSpacer = document.createXULElement("box");
+      alignSpacer.id = "pfx-content-alignment-spacer";
+      alignSpacer.style.flex = "0 0 auto";
+      alignSpacer.style.width = "10px";
+    }
+    if (target.firstChild !== alignSpacer) target.prepend(alignSpacer);
+  }
+  function teardownHorizontalAlignSpacer() {
+    alignSpacer?.remove();
+  }
+
   function positionPanel() {
     const vertical = isVertical();
     panel.toggleAttribute("pfx-horizontal", !vertical);
@@ -2628,19 +2660,15 @@
                  sidebarMain.firstElementChild !== panel) {
         sidebarMain.prepend(panel);
       }
-      // Popover is managed by palefox-drawer in vertical mode
+      teardownHorizontalAlignSpacer();
     } else {
       panel.removeAttribute("pfx-icons-only");
       const tabbrowserTabs = document.getElementById("tabbrowser-tabs");
       if (tabbrowserTabs && tabbrowserTabs.nextElementSibling !== panel) {
         tabbrowserTabs.after(panel);
       }
-      // Remove popover so urlbar leaves the top layer — otherwise it
-      // renders above the horizontal tab popout regardless of z-index
-      const urlbar = document.getElementById("urlbar");
-      if (urlbar?.hasAttribute("popover")) {
-        urlbar.removeAttribute("popover");
-      }
+      reorderHorizontalToolbars();
+      setupHorizontalAlignSpacer();
     }
 
     // Track toolbox height for compact mode offset when toolbox is above sidebar
