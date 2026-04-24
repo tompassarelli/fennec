@@ -1138,6 +1138,26 @@
   }
   const outdentSubtree = outdentRow;
 
+  function moveToRoot(row) {
+    if (!row?._tab) return;
+    const td = treeData(row._tab);
+    if (!td.parentId) return;
+    td.parentId = null;
+    for (const r of subtreeRows(row)) syncAnyRow(r);
+    updateVisibility();
+    scheduleSave();
+  }
+
+  function makeChildOfAbove(row) {
+    if (!row?._tab) return;
+    const prev = row.previousElementSibling;
+    if (!prev?._tab) return;
+    treeData(row._tab).parentId = treeData(prev._tab).id;
+    for (const r of subtreeRows(row)) syncAnyRow(r);
+    updateVisibility();
+    scheduleSave();
+  }
+
   // Alt+j — swap with next sibling at same level
   function swapDown(row) {
     if (!dataOf(row)) return;
@@ -1430,20 +1450,21 @@
     if (e.key === "i") { blurPanel(); gBrowser.selectedBrowser.focus(); return true; }
 
     // --- Alt combos: same in both modes ---
-    // Alt+h/l = outdent/indent subtree, Alt+j/k = swap siblings
-    if (e.altKey && (e.key === "h" || e.code === "KeyH")) {
-      if (cursor) outdentSubtree(cursor);
+    // Alt+h/Left = move to root, Alt+l/Right = make child of above
+    // Alt+j/Down = swap down, Alt+k/Up = swap up
+    if (e.altKey && (e.key === "h" || e.code === "KeyH" || e.key === "ArrowLeft")) {
+      if (cursor) moveToRoot(cursor);
       return true;
     }
-    if (e.altKey && (e.key === "l" || e.code === "KeyL")) {
-      if (cursor) indentSubtree(cursor);
+    if (e.altKey && (e.key === "l" || e.code === "KeyL" || e.key === "ArrowRight")) {
+      if (cursor) makeChildOfAbove(cursor);
       return true;
     }
-    if (e.altKey && (e.key === "j" || e.code === "KeyJ")) {
+    if (e.altKey && (e.key === "j" || e.code === "KeyJ" || e.key === "ArrowDown")) {
       if (cursor) swapDown(cursor);
       return true;
     }
-    if (e.altKey && (e.key === "k" || e.code === "KeyK")) {
+    if (e.altKey && (e.key === "k" || e.code === "KeyK" || e.key === "ArrowUp")) {
       if (cursor) swapUp(cursor);
       return true;
     }
