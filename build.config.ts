@@ -23,4 +23,15 @@ export const entries: Entry[] = [
       "// ==/UserScript==",
     ].join("\n"),
   },
+  {
+    src: "src/drawer/index.ts",
+    out: "palefox-drawer.uc.js",
+    banner: [
+      "// ==UserScript==",
+      "// @name           Palefox Drawer",
+      "// @description    Manages sidebar layout, compact mode, and toolbar positioning",
+      "// @include        main",
+      "// ==/UserScript==",
+    ].join("\n"),
+  },
 ];
