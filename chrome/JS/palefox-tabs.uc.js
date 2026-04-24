@@ -40,7 +40,9 @@
   // pfx.debug is true. Call pfxLog(event, data) anywhere. The log file
   // accumulates across the session; delete it to start fresh.
   // Read it with: `! cat $(firefox -headless 2>/dev/null; echo ~/.mozilla/firefox/*.default*/palefox-debug.log)` or just navigate to the profile dir.
-  const _debugLogPath = "/home/tom/palefox-debug.log";
+  const _debugLogPath = PathUtils.join(
+    Services.dirsvc.get("ProfD", Ci.nsIFile).path, "palefox-debug.log"
+  );
   const _logLines = [];
   let _logFlushPending = false;
   function pfxLog(event, data = {}) {
