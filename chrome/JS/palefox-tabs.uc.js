@@ -2820,11 +2820,14 @@
       #sidebar-main > sidebar-main {
         flex: none !important;
         overflow: hidden !important;
+        position: absolute;
+        bottom: 0;
       }
 
       #pfx-tab-panel {
         flex: 1 !important;
-        min-height: 82% !important;
+        max-height: 76%;
+        margin-top: 8px;
         overflow-y: auto !important;
         overflow-x: hidden !important;
         scrollbar-width: thin;
