@@ -5,6 +5,10 @@
 // scope is fine because top-level code below has no `return`s outside of
 // nested functions.
 
+import { createLogger } from "./log.ts";
+
+const pfxLog = createLogger("tabs");
+
   // --- Constants ---
 
   const INDENT = 14;                // px per nesting level
@@ -33,41 +37,7 @@
     }
   })();
 
-  // --- Debug log ---
-  // Writes a timestamped event log to <profile>/palefox-debug.log when
-  // pfx.debug is true. Call pfxLog(event, data) anywhere. The log file
-  // accumulates across the session; delete it to start fresh.
-  // Read it with: `! cat $(firefox -headless 2>/dev/null; echo ~/.mozilla/firefox/*.default*/palefox-debug.log)` or just navigate to the profile dir.
-  const _debugLogPath = PathUtils.join(
-    Services.dirsvc.get("ProfD", Ci.nsIFile).path, "palefox-debug.log"
-  );
-  const _logLines = [];
-  let _logFlushPending = false;
-  function pfxLog(event, data = {}) {
-    if (!Services.prefs.getBoolPref("pfx.debug", false)) return;
-    const line = `${Date.now()} [tabs] ${event} ${JSON.stringify(data)}`;
-    console.log("[PFX:tabs]", event, data);
-    _logLines.push(line);
-    if (!_logFlushPending) {
-      _logFlushPending = true;
-      Promise.resolve().then(_flushLog);
-    }
-  }
-  function _flushLog() {
-    const lines = _logLines.splice(0);
-    if (!lines.length) { _logFlushPending = false; return; }
-    const blob = lines.join("\n") + "\n";
-    IOUtils.readUTF8(_debugLogPath).then(
-      existing => IOUtils.writeUTF8(_debugLogPath, existing + blob),
-      () => IOUtils.writeUTF8(_debugLogPath, blob)
-    ).then(() => {
-      if (_logLines.length) _flushLog();
-      else _logFlushPending = false;
-    }).catch(e => {
-      console.error("[PFX:tabs] log write failed", e);
-      _logFlushPending = false;
-    });
-  }
+  // (debug log moved to ./log.ts; pfxLog imported above)
 
   // --- State ---
 

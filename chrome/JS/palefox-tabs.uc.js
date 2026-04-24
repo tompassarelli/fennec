@@ -5,7 +5,53 @@
 // ==/UserScript==
 
 (() => {
+  // src/tabs/log.ts
+  var LOG_FILENAME = "palefox-debug.log";
+  var _logPath = null;
+  function logPath() {
+    if (_logPath)
+      return _logPath;
+    _logPath = PathUtils.join(Services.dirsvc.get("ProfD", Ci.nsIFile).path, LOG_FILENAME);
+    return _logPath;
+  }
+  var _lines = [];
+  var _flushPending = false;
+  function flush() {
+    const batch = _lines.splice(0);
+    if (!batch.length) {
+      _flushPending = false;
+      return;
+    }
+    const blob = batch.join(`
+`) + `
+`;
+    const path = logPath();
+    IOUtils.readUTF8(path).then((existing) => IOUtils.writeUTF8(path, existing + blob), () => IOUtils.writeUTF8(path, blob)).then(() => {
+      if (_lines.length)
+        flush();
+      else
+        _flushPending = false;
+    }).catch((e) => {
+      console.error("[PFX:log] write failed", e);
+      _flushPending = false;
+    });
+  }
+  function createLogger(tag) {
+    const consolePrefix = `[PFX:${tag}]`;
+    return (event, data = {}) => {
+      if (!Services.prefs.getBoolPref("pfx.debug", false))
+        return;
+      console.log(consolePrefix, event, data);
+      _lines.push(`${Date.now()} [${tag}] ${event} ${JSON.stringify(data)}`);
+      if (!_flushPending) {
+        _flushPending = true;
+        Promise.resolve().then(flush);
+      }
+    };
+  }
+
   // src/tabs/index.ts
+  var pfxLog = createLogger("tabs");
   var INDENT = 14;
   var SAVE_FILE = "palefox-tab-tree.json";
   var CHORD_TIMEOUT = 500;
@@ -24,39 +70,6 @@
       return null;
     }
   })();
-  var _debugLogPath = PathUtils.join(Services.dirsvc.get("ProfD", Ci.nsIFile).path, "palefox-debug.log");
-  var _logLines = [];
-  var _logFlushPending = false;
-  function pfxLog(event, data = {}) {
-    if (!Services.prefs.getBoolPref("pfx.debug", false))
-      return;
-    const line = `${Date.now()} [tabs] ${event} ${JSON.stringify(data)}`;
-    console.log("[PFX:tabs]", event, data);
-    _logLines.push(line);
-    if (!_logFlushPending) {
-      _logFlushPending = true;
-      Promise.resolve().then(_flushLog);
-    }
-  }
-  function _flushLog() {
-    const lines = _logLines.splice(0);
-    if (!lines.length) {
-      _logFlushPending = false;
-      return;
-    }
-    const blob = lines.join(`
-`) + `
-`;
-    IOUtils.readUTF8(_debugLogPath).then((existing) => IOUtils.writeUTF8(_debugLogPath, existing + blob), () => IOUtils.writeUTF8(_debugLogPath, blob)).then(() => {
-      if (_logLines.length)
-        _flushLog();
-      else
-        _logFlushPending = false;
-    }).catch((e) => {
-      console.error("[PFX:tabs] log write failed", e);
-      _logFlushPending = false;
-    });
-  }
   var treeOf = new WeakMap;
   var rowOf = new WeakMap;
   var hzDisplay = new WeakMap;
