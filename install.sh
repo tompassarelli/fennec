@@ -2,26 +2,66 @@
 set -euo pipefail
 
 REPO="tompassarelli/palefox"
-# Fetch latest tagged release (skip when using a local checkout)
-if [ -z "${PALEFOX_LOCAL:-}" ]; then
-    TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-    if [ -z "$TAG" ]; then
-        echo "Warning: could not fetch latest release tag, falling back to main"
-        TAG="main"
-    fi
-    BRANCH="$TAG"
-fi
 
+# --- Argument parsing ---
 FORCE=false
 NO_BACKUP=false
 USE_LIBREWOLF=false
-for arg in "$@"; do
-    case $arg in
+REF=""
+REF_TYPE=""
+
+print_usage() {
+    echo "Usage: install.sh [options]"
+    echo ""
+    echo "Version targeting (default: latest release):"
+    echo "  --branch NAME      Install from a branch (e.g. main, css-legacy)"
+    echo "  --tag NAME         Install from a tag (e.g. v0.36.4)"
+    echo "  --commit SHA       Install from a specific commit"
+    echo "  --latest-commit    Install from the latest commit on main"
+    echo "  --release VERSION  Install a specific release (e.g. v0.36.4)"
+    echo ""
+    echo "Options:"
+    echo "  --librewolf        Target LibreWolf instead of Firefox"
+    echo "  --force            Overwrite user-customized files"
+    echo "  --no-backup        Skip backing up existing chrome folder"
+    echo "  --help             Show this help"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
         --force) FORCE=true ;;
         --no-backup) NO_BACKUP=true ;;
         --librewolf) USE_LIBREWOLF=true ;;
+        --branch) REF_TYPE="branch"; REF="${2:?--branch requires a name}"; shift ;;
+        --tag) REF_TYPE="tag"; REF="${2:?--tag requires a name}"; shift ;;
+        --commit) REF_TYPE="commit"; REF="${2:?--commit requires a SHA}"; shift ;;
+        --latest-commit) REF_TYPE="branch"; REF="main" ;;
+        --release) REF_TYPE="tag"; REF="${2:?--release requires a version}"; shift ;;
+        --help) print_usage; exit 0 ;;
+        *) echo "Unknown option: $1"; print_usage; exit 1 ;;
     esac
+    shift
 done
+
+# Default: latest release
+if [ -z "$REF_TYPE" ] && [ -z "${PALEFOX_LOCAL:-}" ]; then
+    REF=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
+        | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+    if [ -z "$REF" ]; then
+        echo "Warning: could not fetch latest release tag, falling back to main"
+        REF="main"
+        REF_TYPE="branch"
+    else
+        REF_TYPE="tag"
+    fi
+fi
+
+# Build archive URL
+case "$REF_TYPE" in
+    branch) ARCHIVE_URL="https://github.com/$REPO/archive/refs/heads/$REF.tar.gz" ;;
+    tag)    ARCHIVE_URL="https://github.com/$REPO/archive/refs/tags/$REF.tar.gz" ;;
+    commit) ARCHIVE_URL="https://github.com/$REPO/archive/$REF.tar.gz" ;;
+esac
 
 # Browser selection
 if [ "$USE_LIBREWOLF" = true ]; then
@@ -155,16 +195,11 @@ if [ -n "${PALEFOX_LOCAL:-}" ]; then
         exit 1
     fi
 else
-    # Download stable branch
+    # Download specified ref
     tmp_dir="$(mktemp -d)"
-    echo "Downloading Palefox ($BRANCH)..."
-    if [ "$BRANCH" = "main" ]; then
-        archive_url="https://github.com/$REPO/archive/refs/heads/main.tar.gz"
-    else
-        archive_url="https://github.com/$REPO/archive/refs/tags/$BRANCH.tar.gz"
-    fi
-    if ! curl -fsSL "$archive_url" | tar -xz -C "$tmp_dir"; then
-        echo "Error: Failed to download archive. Check your internet connection."
+    echo "Downloading Palefox ($REF)..."
+    if ! curl -fsSL "$ARCHIVE_URL" | tar -xz -C "$tmp_dir"; then
+        echo "Error: Failed to download archive for ref '$REF'. Check that it exists."
         exit 1
     fi
 

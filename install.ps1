@@ -2,11 +2,83 @@
 $ErrorActionPreference = "Stop"
 
 $repo = "tompassarelli/palefox"
-$branch = "main"
 
-$force = $args -contains "--force" -or $args -contains "-Force"
-$noBackup = $args -contains "--no-backup"
-$useLibrewolf = $args -contains "--librewolf"
+# --- Argument parsing ---
+$force = $false
+$noBackup = $false
+$useLibrewolf = $false
+$ref = ""
+$refType = ""
+
+function Print-Usage {
+    Write-Host "Usage: install.ps1 [options]"
+    Write-Host ""
+    Write-Host "Version targeting (default: latest release):"
+    Write-Host "  --branch NAME      Install from a branch (e.g. main, css-legacy)"
+    Write-Host "  --tag NAME         Install from a tag (e.g. v0.36.4)"
+    Write-Host "  --commit SHA       Install from a specific commit"
+    Write-Host "  --latest-commit    Install from the latest commit on main"
+    Write-Host "  --release VERSION  Install a specific release (e.g. v0.36.4)"
+    Write-Host ""
+    Write-Host "Options:"
+    Write-Host "  --librewolf        Target LibreWolf instead of Firefox"
+    Write-Host "  --force            Overwrite user-customized files"
+    Write-Host "  --no-backup        Skip backing up existing chrome folder"
+    Write-Host "  --help             Show this help"
+}
+
+$i = 0
+while ($i -lt $args.Count) {
+    switch ($args[$i]) {
+        "--force" { $force = $true }
+        "--no-backup" { $noBackup = $true }
+        "--librewolf" { $useLibrewolf = $true }
+        "--branch" {
+            $i++
+            if ($i -ge $args.Count) { Write-Error "--branch requires a name"; exit 1 }
+            $refType = "branch"; $ref = $args[$i]
+        }
+        "--tag" {
+            $i++
+            if ($i -ge $args.Count) { Write-Error "--tag requires a name"; exit 1 }
+            $refType = "tag"; $ref = $args[$i]
+        }
+        "--commit" {
+            $i++
+            if ($i -ge $args.Count) { Write-Error "--commit requires a SHA"; exit 1 }
+            $refType = "commit"; $ref = $args[$i]
+        }
+        "--latest-commit" { $refType = "branch"; $ref = "main" }
+        "--release" {
+            $i++
+            if ($i -ge $args.Count) { Write-Error "--release requires a version"; exit 1 }
+            $refType = "tag"; $ref = $args[$i]
+        }
+        "--help" { Print-Usage; exit 0 }
+        default { Write-Error "Unknown option: $($args[$i])"; Print-Usage; exit 1 }
+    }
+    $i++
+}
+
+# Default: latest release
+if (-not $refType -and -not $env:PALEFOX_LOCAL) {
+    try {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
+        $ref = $release.tag_name
+        $refType = "tag"
+    } catch {
+        Write-Host "Warning: could not fetch latest release tag, falling back to main"
+        $ref = "main"
+        $refType = "branch"
+    }
+}
+
+# Build archive URL
+switch ($refType) {
+    "branch" { $archiveUrl = "https://github.com/$repo/archive/refs/heads/$ref.zip" }
+    "tag"    { $archiveUrl = "https://github.com/$repo/archive/refs/tags/$ref.zip" }
+    "commit" { $archiveUrl = "https://github.com/$repo/archive/$ref.zip" }
+}
 
 # Browser selection
 if ($useLibrewolf) {
@@ -70,8 +142,8 @@ try {
         $profile = $profiles[0]
     } else {
         Write-Host "Multiple $browserName profiles found:"
-        for ($i = 0; $i -lt $profiles.Count; $i++) {
-            Write-Host "  $($i + 1)) $($profiles[$i].Name)"
+        for ($idx = 0; $idx -lt $profiles.Count; $idx++) {
+            Write-Host "  $($idx + 1)) $($profiles[$idx].Name)"
         }
         $choice = Read-Host "Select a profile [1-$($profiles.Count)]"
         $profile = $profiles[[int]$choice - 1]
@@ -83,22 +155,19 @@ try {
 
     # Locate chrome source files
     if ($env:PALEFOX_LOCAL) {
-        # Use local checkout instead of downloading
         $chromeSource = Join-Path $env:PALEFOX_LOCAL "chrome"
         if (-not (Test-Path $chromeSource)) {
             Write-Error "chrome folder not found at $chromeSource"
             exit 1
         }
     } else {
-        # Download stable branch
         New-Item -ItemType Directory -Path $tmpDir | Out-Null
-        Write-Host "Downloading Palefox ($branch)..."
-        $archiveUrl = "https://github.com/$repo/archive/refs/heads/$branch.zip"
+        Write-Host "Downloading Palefox ($ref)..."
         $zipPath = Join-Path $tmpDir "palefox.zip"
         try {
             Invoke-RestMethod -Uri $archiveUrl -OutFile $zipPath
         } catch {
-            Write-Error "Failed to download release archive. Check your internet connection."
+            Write-Error "Failed to download archive for ref '$ref'. Check that it exists."
             exit 1
         }
 
@@ -125,7 +194,6 @@ try {
     }
 
     # Legacy migration gate: detect old monolithic userChrome.css
-    # Positive detection — these markers only exist in the old inline format
     $legacyMigrated = $false
     $userChromeFile = Join-Path $chromeDir "userChrome.css"
     if (Test-Path $userChromeFile) {
@@ -166,14 +234,11 @@ try {
         Copy-Item -Path (Join-Path $utilsSource "*") -Destination $utilsDir -Force
     }
 
-    # Default scripts — add if missing
+    # JS scripts — always overwrite (managed by palefox)
     $jsSource = Join-Path $chromeSource "JS"
     if (Test-Path $jsSource) {
         foreach ($file in (Get-ChildItem -Path $jsSource -File)) {
-            $dest = Join-Path $jsDir $file.Name
-            if (-not (Test-Path $dest)) {
-                Copy-Item -Path $file.FullName -Destination $dest
-            }
+            Copy-Item -Path $file.FullName -Destination (Join-Path $jsDir $file.Name) -Force
         }
     }
 
@@ -198,7 +263,6 @@ try {
     }
 
     if (Test-Path $programSource) {
-        # Locate Firefox install directory
         if ($browserName -eq "LibreWolf") {
             $appDir = (Get-ItemProperty "HKLM:\SOFTWARE\LibreWolf" -ErrorAction SilentlyContinue).InstallDirectory
             if (-not $appDir) {
@@ -264,13 +328,17 @@ try {
     }
 
     Set-BrowserPref "toolkit.legacyUserProfileCustomizations.stylesheets" "true"
-    Set-BrowserPref "sidebar.verticalTabs" "false"
-    Set-BrowserPref "sidebar.revamp" "false"
+    Set-BrowserPref "sidebar.verticalTabs" "true"
+    Set-BrowserPref "sidebar.revamp" "true"
     Set-BrowserPref "sidebar.position_start" "true"
+    Set-BrowserPref "browser.toolbars.bookmarks.visibility" "`"never`""
+    Set-BrowserPref "pfx.sidebar.width" "300"
+
+    # Default toolbar layout
+    Set-BrowserPref "browser.uiCustomization.state" "'{`"placements`":{`"widget-overflow-fixed-list`":[`"fxa-toolbar-menu-button`",`"home-button`",`"alltabs-button`",`"firefox-view-button`"],`"unified-extensions-area`":[],`"nav-bar`":[`"sidebar-button`",`"back-button`",`"forward-button`",`"stop-reload-button`",`"customizableui-special-spring1`",`"vertical-spacer`",`"urlbar-container`",`"customizableui-special-spring2`",`"downloads-button`",`"unified-extensions-button`"],`"toolbar-menubar`":[`"menubar-items`"],`"TabsToolbar`":[`"tabbrowser-tabs`",`"new-tab-button`"],`"vertical-tabs`":[],`"PersonalToolbar`":[`"import-button`",`"personal-bookmarks`"]},`"seen`":[],`"dirtyAreaCache`":[],`"currentVersion`":23,`"newElementCount`":0}'"
 
     Write-Host "Done. Restart $browserName for changes to take effect."
 } finally {
-    # Clean up temp directory
     if (Test-Path $tmpDir) {
         Remove-Item -Path $tmpDir -Recurse -Force
     }

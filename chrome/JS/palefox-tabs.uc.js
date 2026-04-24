@@ -2139,23 +2139,22 @@
       item.addEventListener("command", handler);
       return item;
     }
+    const sep = () => document.createXULElement("menuseparator");
 
+    // --- Palefox items ---
     const renameItem = mi("Rename Tab", () => {
       if (contextTab) startRename(rowOf.get(contextTab));
     });
-
     const collapseItem = mi("Collapse", () => {
       if (!contextTab) return;
       const row = rowOf.get(contextTab);
       if (row) toggleCollapse(row);
     });
-
     const createGroupItem = mi("Create Group", () => {
       if (!contextTab) return;
       const row = rowOf.get(contextTab);
       if (!row) return;
       const grp = createGroupRow("New Group", levelOfRow(row));
-      // Insert after this row's subtree
       const st = subtreeRows(row);
       st[st.length - 1].after(grp);
       setCursor(grp);
@@ -2163,13 +2162,6 @@
       scheduleSave();
       startRename(grp);
     });
-
-    const sep = document.createXULElement("menuseparator");
-
-    const closeItem = mi("Close Tab", () => {
-      if (contextTab) gBrowser.removeTab(contextTab);
-    });
-
     const closeKidsItem = mi("Close Children", () => {
       if (!contextTab) return;
       const row = rowOf.get(contextTab);
@@ -2181,10 +2173,61 @@
       }
     });
 
-    menu.append(renameItem, collapseItem, createGroupItem, sep, closeItem, closeKidsItem);
+    // --- Native actions ---
+    const splitViewItem = mi("Add Split View", () => {
+      if (!contextTab) return;
+      TabContextMenu.contextTab = contextTab;
+      TabContextMenu.contextTabs = [contextTab];
+      TabContextMenu.moveTabsToSplitView();
+    });
+    const reloadItem = mi("Reload Tab", () => {
+      if (contextTab) gBrowser.reloadTab(contextTab);
+    });
+    const muteItem = mi("Mute Tab", () => {
+      if (contextTab) contextTab.toggleMuteAudio();
+    });
+    const pinItem = mi("Pin Tab", () => {
+      if (!contextTab) return;
+      if (contextTab.pinned) gBrowser.unpinTab(contextTab);
+      else gBrowser.pinTab(contextTab);
+    });
+    const duplicateItem = mi("Duplicate Tab", () => {
+      if (contextTab) gBrowser.duplicateTab(contextTab);
+    });
+    const bookmarkItem = mi("Bookmark Tab", () => {
+      if (contextTab) PlacesCommandHook.bookmarkTabs([contextTab]);
+    });
+    const moveToWindowItem = mi("Move to New Window", () => {
+      if (contextTab) gBrowser.replaceTabWithWindow(contextTab);
+    });
+    const copyLinkItem = mi("Copy Link", () => {
+      if (!contextTab) return;
+      const url = contextTab.linkedBrowser?.currentURI?.spec;
+      if (url) {
+        Cc["@mozilla.org/widget/clipboardhelper;1"]
+          .getService(Ci.nsIClipboardHelper).copyString(url);
+      }
+    });
+    const closeItem = mi("Close Tab", () => {
+      if (contextTab) gBrowser.removeTab(contextTab);
+    });
+    const reopenItem = mi("Reopen Closed Tab", () => {
+      undoCloseTab();
+    });
+
+    menu.append(
+      renameItem, collapseItem, createGroupItem, closeKidsItem,
+      sep(),
+      splitViewItem, reloadItem, muteItem, pinItem, duplicateItem,
+      sep(),
+      bookmarkItem, copyLinkItem, moveToWindowItem,
+      sep(),
+      closeItem, reopenItem
+    );
 
     menu.addEventListener("popupshowing", () => {
-      const row = contextTab ? rowOf.get(contextTab) : null;
+      if (!contextTab) return;
+      const row = rowOf.get(contextTab);
       const has = row && hasChildren(row);
       collapseItem.hidden = !has;
       closeKidsItem.hidden = !has;
@@ -2193,6 +2236,13 @@
           dataOf(row).collapsed ? "Expand" : "Collapse"
         );
       }
+      muteItem.setAttribute("label",
+        contextTab.hasAttribute("muted") ? "Unmute Tab" : "Mute Tab"
+      );
+      pinItem.setAttribute("label",
+        contextTab.pinned ? "Unpin Tab" : "Pin Tab"
+      );
+      splitViewItem.hidden = !!contextTab.splitview;
     });
 
     document.getElementById("mainPopupSet").appendChild(menu);

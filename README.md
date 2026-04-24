@@ -13,7 +13,11 @@ A developer-focused alternative to Zen Browser on upstream Firefox
 
 > Palefox runs chrome-privileged JS and CSS — review scripts in `chrome/JS/` before use, and review install scripts before piping them into your shell.
 
-> **Palefox is in beta.** Stable enough for daily use — install from the latest tagged release on `main`. Features are actively evolving.
+> **Palefox is in beta.** Stable enough for daily use. Features are actively evolving.
+
+### Install from latest release (recommended)
+
+Install from the last tagged release for the most stable experience:
 
 **macOS / Linux:**
 ```bash
@@ -22,10 +26,32 @@ curl -fsSL https://raw.githubusercontent.com/tompassarelli/palefox/main/install.
 
 **Windows** (PowerShell):
 ```powershell
-irm https://raw.githubusercontent.com/tompassarelli/palefox/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/tompassarelli/palefox/main/install.ps1 -OutFile $env:TEMP\palefox-install.ps1; & $env:TEMP\palefox-install.ps1
 ```
 
-**LibreWolf:** add `--librewolf` to either command. See the [full installation guide](docs/install.md) for manual install, flags, and details.
+### Install from a branch
+
+Install from `main` (latest development) or `css-legacy` (CSS-only, no JS):
+
+**macOS / Linux:**
+```bash
+# main — latest development
+curl -fsSL https://raw.githubusercontent.com/tompassarelli/palefox/main/install.sh -o /tmp/palefox-install.sh && bash /tmp/palefox-install.sh --branch main
+
+# css-legacy — CSS theme only, no tree tabs or vim keybindings
+curl -fsSL https://raw.githubusercontent.com/tompassarelli/palefox/main/install.sh -o /tmp/palefox-install.sh && bash /tmp/palefox-install.sh --branch css-legacy
+```
+
+**Windows** (PowerShell):
+```powershell
+# main
+irm https://raw.githubusercontent.com/tompassarelli/palefox/main/install.ps1 -OutFile $env:TEMP\palefox-install.ps1; & $env:TEMP\palefox-install.ps1 --branch main
+
+# css-legacy
+irm https://raw.githubusercontent.com/tompassarelli/palefox/main/install.ps1 -OutFile $env:TEMP\palefox-install.ps1; & $env:TEMP\palefox-install.ps1 --branch css-legacy
+```
+
+**LibreWolf:** add `--librewolf` to any command above. See the [full installation guide](docs/install.md) for manual install, flags, and details.
 
 ## Features
 

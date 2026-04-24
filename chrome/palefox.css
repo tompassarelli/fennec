@@ -305,3 +305,15 @@ Preserve these (security warnings):
 }
 
 /* #endregion draggable sidebar */
+
+/* #region split view
+ * Hide the focus outline on the active split view panel by default.
+ * Set pfx.splitView.outline to true in about:config to show. */
+
+@media not -moz-pref("pfx.splitView.outline") {
+  #tabbrowser-tabpanels[splitview] .deck-selected > .browserContainer {
+    outline: none !important;
+  }
+}
+
+/* #endregion split view */
