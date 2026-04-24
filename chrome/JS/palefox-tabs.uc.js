@@ -1922,38 +1922,61 @@
     });
   }
 
-  // Symmetric drop handler on the tree panel — lets users drag a pinned tab
-  // into the panel area to unpin it. Activates when:
-  //   1. The panel has no tab rows (only the spacer): unpin → row appears here.
-  //   2. The drop lands on whitespace after the last row: unpin and append.
+  // Drop handler on the tree panel itself (not its rows). Handles two
+  // distinct drop intents that the per-row handlers don't cover:
+  //   - Pinned-tab drag dropped on panel whitespace → unpin and append.
+  //   - Unpinned-tab drag dropped on panel whitespace → move to end at root.
+  // Both also cover the empty-panel case (only the spacer is present).
   function setupPanelDrop(p) {
     p.addEventListener("dragover", (e) => {
-      if (!dragSource || !dragSource._tab?.pinned) return;
+      if (!dragSource) return;
       // Only handle if the dragover landed on the panel itself or the spacer
       // (rows handle their own dragover).
       if (e.target !== p && e.target !== spacer) return;
+
+      // For unpinned drags, find the last root-level row that isn't part of
+      // the source's own subtree — that's the anchor for an "after" drop.
+      // For pinned drags, any last row works as an anchor (executeDrop will
+      // unpin first, then place the row).
+      const srcPinned = !!dragSource._tab?.pinned;
+      let anchor;
+      if (srcPinned) {
+        anchor = p.querySelector(".pfx-tab-row:last-of-type, .pfx-group-row:last-of-type");
+      } else {
+        const srcSubtree = new Set(subtreeRows(dragSource));
+        const rows = [...p.querySelectorAll(".pfx-tab-row, .pfx-group-row")];
+        for (let i = rows.length - 1; i >= 0; i--) {
+          if (levelOfRow(rows[i]) === 0 && !srcSubtree.has(rows[i])) {
+            anchor = rows[i];
+            break;
+          }
+        }
+      }
+
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
-      const lastRow = p.querySelector(".pfx-tab-row:last-of-type, .pfx-group-row:last-of-type");
-      if (lastRow) {
-        dropTarget = lastRow;
+      if (anchor) {
+        dropTarget = anchor;
         dropPosition = "after";
-        showDropIndicator(lastRow, "after");
+        showDropIndicator(anchor, "after");
       } else {
-        dropTarget = p;
+        // No usable anchor (empty panel, or unpinned drag where source is
+        // the only root). For pinned: signal "unpin into empty panel".
+        // For unpinned: nothing to do (already at end of root).
+        dropTarget = srcPinned ? p : null;
         dropPosition = "into-empty-panel";
       }
     });
 
     p.addEventListener("drop", (e) => {
-      if (!dragSource || !dragSource._tab?.pinned) return;
+      if (!dragSource) return;
       if (e.target !== p && e.target !== spacer && dropTarget !== p) return;
       e.preventDefault();
       const tab = dragSource._tab;
-      if (!tab) return;
+      if (!tab) { clearDropIndicator(); return; }
       if (dropTarget === p) {
-        // Empty panel: just unpin. onTabUnpinned moves the row in.
-        gBrowser.unpinTab(tab);
+        // Empty panel + pinned source: just unpin. onTabUnpinned routes the row.
+        if (tab.pinned) gBrowser.unpinTab(tab);
       } else if (dropTarget?._tab) {
         executeDrop(dragSource, dropTarget, dropPosition);
       }
