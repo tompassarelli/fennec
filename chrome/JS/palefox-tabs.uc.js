@@ -52,7 +52,7 @@
   // Multi-select
   const selection = new Set();      // rows in the current selection
 
-  // Tabs currently being moved by palefox via gBrowser.moveTab. During a
+  // Tabs currently being moved by palefox via gBrowser.moveTabTo. During a
   // move, Firefox transiently toggles `busy` on the tab (animation state);
   // if syncTabRow observes `busy=true` and mirrors it to the row, CSS fades
   // the row's icon. We skip the busy-sync and tree-resync for tabs in this
@@ -576,7 +576,7 @@
       const tabsArr = [...gBrowser.tabs];
       const lastIdx = tabsArr.length - 1;
       if (tabsArr.indexOf(tab) !== lastIdx) {
-        try { gBrowser.moveTab(tab, lastIdx); } catch {}
+        try { gBrowser.moveTabTo(tab, { tabIndex: lastIdx }); } catch {}
       }
     }
 
@@ -1747,14 +1747,14 @@
     // One final clean resync happens below after all moves settle.
     for (const t of movedTabs) movingTabs.add(t);
 
-    // gBrowser.moveTab each moved tab, adjusting indices as we go so the
+    // moveTabTo each moved tab, adjusting indices as we go so the
     // group lands contiguously in the right spot.
     let insertIdx = targetIdx;
     for (const t of movedTabs) {
       const currentIdx = [...gBrowser.tabs].indexOf(t);
       if (currentIdx < 0) continue;
       if (currentIdx < insertIdx) insertIdx--;
-      if (currentIdx !== insertIdx) gBrowser.moveTab(t, insertIdx);
+      if (currentIdx !== insertIdx) gBrowser.moveTabTo(t, { tabIndex: insertIdx });
       insertIdx++;
     }
 
