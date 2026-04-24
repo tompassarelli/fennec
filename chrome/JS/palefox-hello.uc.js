@@ -5,4 +5,7 @@
 // @onlyonce
 // ==/UserScript==
 
-console.log("palefox: fx-autoconfig loaded successfully");
+(() => {
+  // src/hello/index.ts
+  console.log("palefox: fx-autoconfig loaded successfully");
+})();

@@ -2,4 +2,13 @@
 sideberry-data.json
 
 # Chrome DOM dump artifacts (keep the dump script, not the output)
-docs/chrome-reference/*-dom-*.txtNOTES/
+docs/chrome-reference/*-dom-*.txt
+
+# Notes (private)
+NOTES/
+
+# Bun / TypeScript build pipeline
+node_modules/
+.devenv/
+.direnv/
+*.tsbuildinfo
