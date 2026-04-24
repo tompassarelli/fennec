@@ -1813,28 +1813,39 @@
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData("text/plain", "");
       row.setAttribute("pfx-dragging", "true");
+      // Reveal an empty pinned drop zone so unpinned tabs can be pinned
+      // by dropping into the area at the top of the sidebar.
+      if (pinnedContainer && !row._tab?.pinned
+          && !pinnedContainer.querySelector(".pfx-tab-row")) {
+        pinnedContainer.hidden = false;
+        pinnedContainer.setAttribute("pfx-empty-zone", "true");
+      }
     });
 
     row.addEventListener("dragend", () => {
       dragSource?.removeAttribute("pfx-dragging");
       dragSource = null;
       clearDropIndicator();
+      // Restore hidden state on the empty pinned drop zone if still empty.
+      if (pinnedContainer?.hasAttribute("pfx-empty-zone")) {
+        pinnedContainer.removeAttribute("pfx-empty-zone");
+        if (!pinnedContainer.querySelector(".pfx-tab-row")) {
+          pinnedContainer.hidden = true;
+        }
+      }
     });
 
     row.addEventListener("dragover", (e) => {
       if (!dragSource || dragSource === row) return;
       // Don't allow drop onto own subtree
       if (subtreeRows(dragSource).includes(row)) return;
-      // Pinned and unpinned tabs cannot mix-drop. Pinned drags stay within
-      // the pinned container; unpinned drags stay within the tree panel.
-      const srcPinned = !!dragSource._tab?.pinned;
-      const tgtPinned = !!row._tab?.pinned;
-      if (srcPinned !== tgtPinned) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
 
-      if (srcPinned) {
-        // Pinned: horizontal layout, before/after only (no child).
+      const tgtPinned = !!row._tab?.pinned;
+      if (tgtPinned) {
+        // Target is pinned — horizontal layout, before/after only.
+        // (Pinned tabs can't have children.)
         const rect = row.getBoundingClientRect();
         const x = e.clientX - rect.left;
         dropPosition = x < rect.width / 2 ? "before" : "after";
@@ -1862,6 +1873,44 @@
       if (!dragSource || dragSource === row) return;
       if (subtreeRows(dragSource).includes(row)) return;
       executeDrop(dragSource, row, dropPosition);
+      clearDropIndicator();
+    });
+  }
+
+  // Drop handlers on the pinned container itself, for two cases:
+  //   1. The container is empty (no rows to drag-over): pin the source.
+  //   2. Drop in trailing whitespace after the last pinned row: pin and append.
+  function setupPinnedContainerDrop(container) {
+    container.addEventListener("dragover", (e) => {
+      if (!dragSource || dragSource._tab?.pinned) return;
+      // Only handle drops landing directly on the container, not on a child row
+      // (rows have their own dragover handlers).
+      if (e.target !== container) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const lastRow = container.querySelector(".pfx-tab-row:last-of-type");
+      if (lastRow) {
+        dropTarget = lastRow;
+        dropPosition = "after";
+        showDropIndicator(lastRow, "after");
+      } else {
+        dropTarget = container;
+        dropPosition = "into-empty-pinned";
+      }
+    });
+
+    container.addEventListener("drop", (e) => {
+      if (!dragSource || dragSource._tab?.pinned) return;
+      if (e.target !== container && dropTarget !== container) return;
+      e.preventDefault();
+      const tab = dragSource._tab;
+      if (!tab) return;
+      if (dropTarget === container) {
+        // Empty pinned container: just pin. onTabPinned moves the row.
+        gBrowser.pinTab(tab);
+      } else if (dropTarget?._tab) {
+        executeDrop(dragSource, dropTarget, dropPosition);
+      }
       clearDropIndicator();
     });
   }
@@ -1908,9 +1957,17 @@
     const tgtLevel = levelOfRow(tgtRow);
     if (!dataOf(tgtRow)) return;
 
-    // Collect rows to move: multi-select or single subtree
+    const srcPinned = !!srcRow._tab?.pinned;
+    const tgtPinned = !!tgtRow._tab?.pinned;
+    const isCrossContainer = srcPinned !== tgtPinned;
+
+    // Collect rows to move. Cross-container drags only carry the source tab
+    // itself — pinned tabs can't have children, and dragging a pinned tab
+    // out shouldn't drag siblings with it.
     let movedRows;
-    if (selection.size > 1 && selection.has(srcRow)) {
+    if (isCrossContainer) {
+      movedRows = srcRow._tab ? [srcRow] : [];
+    } else if (selection.size > 1 && selection.has(srcRow)) {
       movedRows = allRows().filter(r => selection.has(r));
     } else {
       movedRows = subtreeRows(srcRow);
@@ -1918,13 +1975,15 @@
     if (!movedRows.length) return;
 
     const srcLevel = levelOfRow(movedRows[0]);
-    const newSrcLevel = position === "child" ? tgtLevel + 1 : tgtLevel;
+    const newSrcLevel = (position === "child" && !tgtPinned) ? tgtLevel + 1 : tgtLevel;
     const delta = newSrcLevel - srcLevel;
 
-    // Source's new parent: tgt itself (child) or tgt's parent (before/after).
-    const newParentForSource = position === "child"
-      ? (tgtRow._tab ? treeData(tgtRow._tab).id : null)
-      : (tgtRow._tab ? treeData(tgtRow._tab).parentId : null);
+    // Source's new parent: pinned target → null; child → tgt; before/after → tgt's parent.
+    const newParentForSource = tgtPinned
+      ? null
+      : (position === "child"
+          ? (tgtRow._tab ? treeData(tgtRow._tab).id : null)
+          : (tgtRow._tab ? treeData(tgtRow._tab).parentId : null));
 
     // Update parentId for top-level moved tabs; descendants keep their
     // existing parentId pointers (they follow the source in the subtree).
@@ -1941,10 +2000,21 @@
       }
     }
 
+    const movedTabs = movedRows.filter(r => r._tab).map(r => r._tab);
+
+    // Cross-container: apply pin/unpin BEFORE computing targetIdx, since
+    // pinTab/unpinTab moves the tab in gBrowser.tabs. Our onTabPinned/
+    // onTabUnpinned handlers will route the row to the right container.
+    if (isCrossContainer) {
+      for (const t of movedTabs) {
+        if (tgtPinned && !t.pinned) gBrowser.pinTab(t);
+        else if (!tgtPinned && t.pinned) gBrowser.unpinTab(t);
+      }
+    }
+
     // Move Firefox tabs via gBrowser.moveTab so our panel and Firefox's tab
     // strip stay aligned. TabMove handlers reorder palefox rows in response.
     // Groups have no Firefox counterpart; we move them via DOM below.
-    const movedTabs = movedRows.filter(r => r._tab).map(r => r._tab);
     const tabsArr = [...gBrowser.tabs];
 
     // Compute target index in Firefox's tab list.
@@ -2726,6 +2796,22 @@
       #pfx-pinned-container[hidden] {
         display: none !important;
       }
+      /* Empty drop zone — shown during drag of unpinned tabs */
+      #pfx-pinned-container[pfx-empty-zone] {
+        min-height: 40px;
+        border: 1.5px dashed color-mix(in srgb, currentColor 25%, transparent);
+        border-radius: 4px;
+        margin: 4px var(--pfx-sidebar-inset);
+        padding: 4px;
+        justify-content: center;
+        opacity: 0.7;
+      }
+      #pfx-pinned-container[pfx-empty-zone]::before {
+        content: "drop to pin";
+        font-size: 11px;
+        opacity: 0.6;
+        align-self: center;
+      }
       #pfx-pinned-container .pfx-tab-row {
         width: 32px;
         height: 32px;
@@ -3092,6 +3178,7 @@
     pinnedContainer = document.createXULElement("hbox");
     pinnedContainer.id = "pfx-pinned-container";
     pinnedContainer.hidden = true;
+    setupPinnedContainerDrop(pinnedContainer);
 
     panel = document.createXULElement("vbox");
     panel.id = "pfx-tab-panel";
