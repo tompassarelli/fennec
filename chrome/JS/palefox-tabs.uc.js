@@ -35,6 +35,40 @@
     }
   })();
 
+  // --- Debug log ---
+  // Writes a timestamped event log to <profile>/palefox-debug.log when
+  // pfx.debug is true. Call pfxLog(event, data) anywhere. The log file
+  // accumulates across the session; delete it to start fresh.
+  // Read it with: `! cat $(firefox -headless 2>/dev/null; echo ~/.mozilla/firefox/*.default*/palefox-debug.log)` or just navigate to the profile dir.
+  const _debugLogPath = "/home/tom/palefox-debug.log";
+  const _logLines = [];
+  let _logFlushPending = false;
+  function pfxLog(event, data = {}) {
+    if (!Services.prefs.getBoolPref("pfx.debug", false)) return;
+    const line = `${Date.now()} [tabs] ${event} ${JSON.stringify(data)}`;
+    console.log("[PFX:tabs]", event, data);
+    _logLines.push(line);
+    if (!_logFlushPending) {
+      _logFlushPending = true;
+      Promise.resolve().then(_flushLog);
+    }
+  }
+  function _flushLog() {
+    const lines = _logLines.splice(0);
+    if (!lines.length) { _logFlushPending = false; return; }
+    const blob = lines.join("\n") + "\n";
+    IOUtils.readUTF8(_debugLogPath).then(
+      existing => IOUtils.writeUTF8(_debugLogPath, existing + blob),
+      () => IOUtils.writeUTF8(_debugLogPath, blob)
+    ).then(() => {
+      if (_logLines.length) _flushLog();
+      else _logFlushPending = false;
+    }).catch(e => {
+      console.error("[PFX:tabs] log write failed", e);
+      _logFlushPending = false;
+    });
+  }
+
   // --- State ---
 
   const treeOf = new WeakMap();     // native tab → { level, name, state, collapsed }
@@ -70,6 +104,8 @@
   // via onTabOpen consume entries from the head of this queue in order,
   // using URL when resolvable and positional-blindspot when pending.
   const savedTabQueue = [];
+  let _lastLoadedNodes = [];
+  let _inSessionRestore = true;
 
   let nextTabId = 1;
 
@@ -104,11 +140,12 @@
     if (!treeOf.has(tab)) {
       let id = readPinnedId(tab);
       if (id) {
-        // Tab already has an id pinned from a prior session — keep it.
         if (id >= nextTabId) nextTabId = id + 1;
+        pfxLog("treeData:pfxId", { pfxId: id, label: tab.label, nextTabId });
       } else {
         id = nextTabId++;
         pinTabId(tab, id);
+        pfxLog("treeData:fresh", { id, label: tab.label, nextTabId });
       }
       treeOf.set(tab, {
         id, parentId: null, name: null, state: null, collapsed: false,
@@ -517,6 +554,7 @@
     td.state = prior.state || null;
     td.collapsed = !!prior.collapsed;
     pinTabId(tab, td.id);
+    pfxLog("applySavedToTab", { id: td.id, parentId: td.parentId, priorId: prior.id, priorParentId: prior.parentId });
     scheduleTreeResync();
   }
 
@@ -543,6 +581,8 @@
     // session-restored tabs whose URL hasn't materialized yet.
     const prior = popSavedForTab(tab);
     if (prior) {
+      const idx = [...gBrowser.tabs].indexOf(tab);
+      console.log(`palefox-tabs: onTabOpen matched — tab[${idx}] url="${tabUrl(tab)}" → saved id=${prior.id} parentId=${prior.parentId} origIdx=${prior._origIdx}`);
       applySavedToTab(tab, prior);
       const row = createTabRow(tab);
       panel.insertBefore(row, spacer);
@@ -647,17 +687,43 @@
     return i >= 0 ? savedTabQueue.splice(i, 1)[0] : null;
   }
 
-  // Combined helper: exact URL match when resolvable, index-based match for
-  // pending tabs (matches their position in gBrowser.tabs against saved
-  // _origIdx). This is robust to the order Firefox's session restore fires
-  // TabOpen events in — positions are authoritative, arrival timing is not.
+  // Combined helper: match a tab to its saved node.
+  //
+  // Priority order:
+  //   1. pfx-id attribute — Firefox persists this via persistTabAttribute, so
+  //      restored tabs arrive with their previous-session palefox ID already
+  //      set. Reliable regardless of tab index or whether the URL has loaded.
+  //   2. Exact URL — for tabs that somehow lack a pfx-id but have a known URL.
+  //   3. Index-based blindspot — last resort for pending about:blank tabs.
+  //      Only correct when no extra tabs (e.g. localhost) offset the indices.
   function popSavedForTab(tab) {
+    const pinnedId = readPinnedId(tab);
     const u = tabUrl(tab);
-    if (u && u !== "about:blank") {
-      return popSavedByUrl(u);
-    }
     const idx = [...gBrowser.tabs].indexOf(tab);
-    return popSavedByIndex(idx);
+
+    // 1. pfx-id match — most reliable, survives any tab ordering.
+    //    Requires persistTabAttribute to be working; falls through if not.
+    if (pinnedId) {
+      const i = savedTabQueue.findIndex(s => s.id === pinnedId);
+      if (i >= 0) {
+        pfxLog("popSavedForTab:pfxId", { idx, pfxId: pinnedId, url: u });
+        return savedTabQueue.splice(i, 1)[0];
+      }
+    }
+
+    // 2. URL match — reliable when the URL has already resolved.
+    if (u && u !== "about:blank") {
+      const node = popSavedByUrl(u);
+      pfxLog("popSavedForTab:url", { idx, url: u, found: !!node });
+      return node;
+    }
+
+    // 3. FIFO — only during session restore (startup or Ctrl+Shift+T).
+    //    Gated by _inSessionRestore so new user tabs don't consume stale entries.
+    if (!_inSessionRestore) return null;
+    const node = savedTabQueue.length ? savedTabQueue.shift() : null;
+    pfxLog("popSavedForTab:fifo", { idx, pfxId: pinnedId, url: u, nodeId: node?.id, nodeOrigIdx: node?._origIdx });
+    return node;
   }
 
   // Fires when SessionStore restores a tab (activation of a lazy tab, or
@@ -674,14 +740,19 @@
   function onTabRestoring(e) {
     const tab = e.target;
     const url = tabUrl(tab);
+    const idx = [...gBrowser.tabs].indexOf(tab);
+    pfxLog("onTabRestoring", { idx, url, currentId: treeOf.get(tab)?.id, currentParentId: treeOf.get(tab)?.parentId, queueLen: savedTabQueue.length });
 
     const entry = popClosedEntry(url);
     if (!entry) {
-      // Correction path — force-apply the URL-matched entry over whatever
-      // was applied earlier.
+      // Correction path — only for tabs that didn't get FIFO-assigned data.
+      // FIFO sets appliedSavedState; if set, the assignment is authoritative
+      // and stale queue entries must not overwrite it.
+      const td = treeData(tab);
+      if (td.appliedSavedState) return;
       const correction = popSavedByUrl(url);
       if (correction) {
-        const td = treeData(tab);
+        pfxLog("onTabRestoring:correction", { idx, url, savedId: correction.id, savedParentId: correction.parentId, parentResolvesTo: tabById(correction.parentId)?.label });
         td.id = correction.id || td.id;
         td.parentId = correction.parentId ?? null;
         td.name = correction.name || null;
@@ -2208,7 +2279,12 @@
     // Preserve unconsumed saved-state entries (tabs we expected but haven't
     // seen this session yet) so periodic saves during a blank window don't
     // clobber them before the real window is restored.
-    const leftovers = savedTabQueue.map(s => ({ ...s, type: "tab" }));
+    // Filter out leftovers whose URL matches a live tab to prevent duplicates
+    // that corrupt the correction path on subsequent restores.
+    const liveUrls = new Set(tabEntries.map(e => e.url).filter(Boolean));
+    const leftovers = savedTabQueue
+      .filter(s => !s.url || !liveUrls.has(s.url))
+      .map(s => ({ ...s, type: "tab" }));
 
     const out = [...tabEntries, ...groupEntries, ...leftovers];
 
@@ -2251,6 +2327,17 @@
 
       const tabs = allTabs();
       const tabNodes = saved.nodes.filter(n => n.type === "tab");
+      _lastLoadedNodes = tabNodes.map(s => ({ ...s }));
+
+      // Belt-and-suspenders: advance nextTabId past every saved node ID before
+      // any tab calls treeData(). saved.nextTabId covers this normally, but if
+      // it was missing/stale, fresh startup tabs (localhost, etc.) would get an
+      // ID that collides with a restored session tab's pfx-id attribute, causing
+      // the wrong tab to resolve as parent in the tree.
+      for (const s of tabNodes) {
+        if (s.id && s.id >= nextTabId) nextTabId = s.id + 1;
+      }
+      pfxLog("loadFromDisk", { nextTabId, savedNextTabId: saved.nextTabId, tabNodes: tabNodes.length, liveTabs: tabs.length, tabNodeIds: tabNodes.map(s => s.id), liveTabPfxIds: tabs.map(t => t.getAttribute?.("pfx-id") || 0) });
 
       // Legacy-format migration: if tab nodes have `level` but no `parentId`,
       // derive parentId from level+order via a stack walk.
@@ -2793,6 +2880,40 @@
     });
 
     // Clicking content area blurs the panel naturally via the blur listener.
+
+    // After any session restore (startup auto-restore or Ctrl+Shift+T manual
+    // restore), fire a final tree resync. scheduleTreeResync() defers via
+    // Promise microtask — if Firefox creates session tabs asynchronously across
+    // multiple tasks, the per-TabOpen microtask resolves parentId chains before
+    // all tabs exist. A resync here guarantees a clean pass once everything
+    // is in gBrowser.tabs. One-shot: remove after first fire.
+    const onSessionRestored = () => {
+      console.log("palefox-tabs: sessionstore-windows-restored — final tree resync");
+      pfxLog("sessionstore-windows-restored", { queueLen: savedTabQueue.length, inSessionRestore: _inSessionRestore });
+      savedTabQueue.length = 0;
+      _inSessionRestore = false;
+      scheduleTreeResync();
+    };
+    Services.obs.addObserver(onSessionRestored, "sessionstore-windows-restored");
+
+    const onManualRestore = () => {
+      const aliveUrls = new Set(
+        [...gBrowser.tabs].map(t => tabUrl(t)).filter(u => u && u !== "about:blank")
+      );
+      savedTabQueue.length = 0;
+      _lastLoadedNodes.forEach((s, i) => {
+        if (aliveUrls.has(s.url)) return;
+        savedTabQueue.push({ ...s, _origIdx: i });
+      });
+      _inSessionRestore = true;
+      pfxLog("manualRestoreArmed", { queueLen: savedTabQueue.length, queueIds: savedTabQueue.map(s => s.id) });
+    };
+    Services.obs.addObserver(onManualRestore, "sessionstore-initiating-manual-restore");
+
+    window.addEventListener("unload", () => {
+      try { Services.obs.removeObserver(onSessionRestored, "sessionstore-windows-restored"); } catch {}
+      try { Services.obs.removeObserver(onManualRestore, "sessionstore-initiating-manual-restore"); } catch {}
+    }, { once: true });
 
     console.log("palefox-tabs: initialized");
   }
