@@ -34,4 +34,15 @@ export const entries: Entry[] = [
       "// ==/UserScript==",
     ].join("\n"),
   },
+  {
+    src: "src/tabs/index.ts",
+    out: "palefox-tabs.uc.js",
+    banner: [
+      "// ==UserScript==",
+      "// @name           Palefox Tabs",
+      "// @description    Tree-style tab panel with vim keybindings",
+      "// @include        main",
+      "// ==/UserScript==",
+    ].join("\n"),
+  },
 ];
