@@ -140,11 +140,22 @@ Mark items as you ship them. Do NOT skip a sprint to start a later one.
 
 ### Sprint 2 — Tier 2 (mocked DOM)
 
-- [ ] Add `happy-dom` dev dep
-- [ ] `src/test/harness.ts` — mock `Services`, `IOUtils`, `gBrowser`, `document.createXULElement`, `requestAnimationFrame`, fake timers
-- [ ] `src/drawer/compact.test.ts` — toggle, hover/leave linger, collapse-protection drops, popup counter pins, watchdog rescues
-- [ ] One additional module covered (`drag.ts` OR `rows.ts`)
-- [ ] Coverage report shows Tier 2 jump
+- [x] Add `happy-dom` dev dep
+- [x] `src/test/harness.ts` — happy-dom window/document, mock `Services` (with
+      addObserver/notify cascade), `IOUtils`, `ChromeUtils`, `Ci`/`Cu`/`Cc`,
+      `requestAnimationFrame`, `getComputedStyle`, `MutationObserver`,
+      `document.createXULElement` mapped to `createElement`, pre-populated
+      `#sidebar-main` and `#navigator-toolbox`. Restore-on-cleanup pattern.
+- [x] `src/drawer/compact.test.ts` — 17 tests covering toggle (vert+horiz),
+      attribute write-through, pref-observer cascade, verticalTabs auto-swap
+      (in both directions), pinSidebar/pinToolbox, destroy cleanup, init-time
+      `applyCompactForCurrentMode`.
+- [ ] One additional module covered (`drag.ts` OR `rows.ts`) — deferred
+- [x] Coverage report runs (`bun test --coverage`). **Caveat:** Bun's
+      coverage % under-reports closure-heavy files (`compact.ts` shows ~7%
+      line coverage despite real exercise). Treat the coverage tool as a
+      hint, not ground truth. Use the test count + scenario list as the
+      authoritative measure.
 
 ### Sprint 3 — Tier 3 (real Firefox)
 

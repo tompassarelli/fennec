@@ -9,7 +9,8 @@
     "test": "bun test"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "happy-dom": "^20.9.0"
   },
   "peerDependencies": {
     "typescript": "^5"
