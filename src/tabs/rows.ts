@@ -208,13 +208,13 @@ export function makeRows(deps: RowsDeps): RowsAPI {
         startRename(row);
       }
     });
-    // Right-click on a group → rename. We don't have a group-specific
-    // context menu yet; this is the most common ask. (A proper group menu
-    // would replace this once we extend menu.ts to handle row-or-tab targets.)
     row.addEventListener("contextmenu", (e) => {
+      const me = e as MouseEvent;
       e.preventDefault();
       e.stopPropagation();
-      startRename(row);
+      state.contextGroupRow = row;
+      const menu = document.getElementById("pfx-group-menu") as any;
+      menu?.openPopupAtScreen(me.screenX, me.screenY, true);
     });
 
     setupDrag(row);

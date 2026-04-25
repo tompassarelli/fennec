@@ -1,12 +1,13 @@
-// Tab context menu — palefox items at top, native Firefox actions below.
+// Tab + group context menus.
 //
 // Public API:
-//   buildContextMenu(deps) — constructs the menupopup, appends it to
-//   #mainPopupSet, returns the element. Call once at init time.
+//   buildContextMenu(deps)       — tab menu (#pfx-tab-menu)
+//   buildGroupContextMenu(deps)  — group menu (#pfx-group-menu)
+// Both build their menupopup once at init and return the element.
 //
-// state.contextTab is the read-only "currently right-clicked tab" — it's
-// written by the row-level contextmenu listener (in createTabRow / legacy)
-// before openPopupAtScreen fires, so by the time popupshowing runs it's set.
+// state.contextTab / state.contextGroupRow are set by the row-level
+// contextmenu listeners (in rows.ts) before openPopupAtScreen fires, so
+// by the time popupshowing runs the relevant target is available.
 
 import { rowOf, state } from "./state.ts";
 import { dataOf, hasChildren, levelOfRow, subtreeRows } from "./helpers.ts";
@@ -168,6 +169,120 @@ export function buildContextMenu(deps: MenuDeps): HTMLElement {
       state.contextTab.pinned ? "Unpin Tab" : "Pin Tab",
     );
     splitViewItem.hidden = !!state.contextTab.splitview;
+  });
+
+  document.getElementById("mainPopupSet")!.appendChild(menu);
+  return menu;
+}
+
+
+// =============================================================================
+// GROUP CONTEXT MENU
+// =============================================================================
+
+export type GroupMenuDeps = {
+  readonly startRename: (row: Row) => void;
+  /** Toggle a row's collapsed state in the tree. */
+  readonly toggleCollapse: (row: Row) => void;
+  /** Polymorphic row sync — used after decrementing nested group levels. */
+  readonly syncGroupRow: (row: Row) => void;
+  readonly updateVisibility: () => void;
+  readonly scheduleSave: () => void;
+};
+
+/** Build the group-row context menu. Operates on state.contextGroupRow,
+ *  which the row's contextmenu listener sets before openPopupAtScreen. */
+export function buildGroupContextMenu(deps: GroupMenuDeps): HTMLElement {
+  const { startRename, toggleCollapse, syncGroupRow, updateVisibility, scheduleSave } = deps;
+
+  const menu = document.createXULElement("menupopup") as HTMLElement;
+  menu.id = "pfx-group-menu";
+
+  function mi(label: string, handler: () => void): HTMLElement {
+    const item = document.createXULElement("menuitem") as HTMLElement;
+    item.setAttribute("label", label);
+    item.addEventListener("command", handler);
+    return item;
+  }
+  const sep = () => document.createXULElement("menuseparator") as HTMLElement;
+
+  const renameItem = mi("Rename Group", () => {
+    if (state.contextGroupRow) startRename(state.contextGroupRow);
+  });
+
+  const collapseItem = mi("Collapse", () => {
+    if (state.contextGroupRow) toggleCollapse(state.contextGroupRow);
+  });
+
+  const closeGroupItem = mi("Close Group", () => {
+    const row = state.contextGroupRow;
+    if (!row || !row._group) return;
+    // Decrement nested groups in the visual subtree by one level (matches
+    // the existing closeFocused() behavior for groups). Tabs derive their
+    // depth from parentId, so they don't need adjustment.
+    const myLevel = row._group.level || 0;
+    let next = row.nextElementSibling;
+    while (next && next !== state.spacer) {
+      const lv = levelOfRow(next);
+      if (lv <= myLevel) break;
+      if (next._group) {
+        next._group.level = Math.max(0, (next._group.level || 0) - 1);
+        syncGroupRow(next as Row);
+      }
+      next = next.nextElementSibling;
+    }
+    row.remove();
+    updateVisibility();
+    scheduleSave();
+  });
+
+  const closeTabsItem = mi("Close Tabs in Group", () => {
+    const row = state.contextGroupRow;
+    if (!row) return;
+    const tabsInGroup = subtreeRows(row)
+      .slice(1) // skip the group row itself
+      .filter(r => r._tab)
+      .map(r => r._tab!);
+    // Close in reverse so index shifts don't matter.
+    for (let i = tabsInGroup.length - 1; i >= 0; i--) {
+      gBrowser.removeTab(tabsInGroup[i]);
+    }
+  });
+
+  const moveToWindowItem = mi("Move Tabs to New Window", () => {
+    const row = state.contextGroupRow;
+    if (!row) return;
+    const tabsInGroup = subtreeRows(row)
+      .slice(1)
+      .filter(r => r._tab)
+      .map(r => r._tab!);
+    if (!tabsInGroup.length) return;
+    if (typeof gBrowser.replaceTabsWithWindow === "function") {
+      gBrowser.replaceTabsWithWindow(tabsInGroup);
+    } else {
+      // Fallback: lift the first tab to a new window.
+      gBrowser.replaceTabWithWindow(tabsInGroup[0]);
+    }
+  });
+
+  menu.append(
+    renameItem, collapseItem, closeTabsItem,
+    sep(),
+    closeGroupItem, moveToWindowItem,
+  );
+
+  menu.addEventListener("popupshowing", () => {
+    const row = state.contextGroupRow;
+    if (!row || !row._group) return;
+    const has = hasChildren(row);
+    collapseItem.hidden = !has;
+    if (has) {
+      collapseItem.setAttribute("label",
+        row._group.collapsed ? "Expand" : "Collapse",
+      );
+    }
+    closeTabsItem.hidden = !has;
+    moveToWindowItem.hidden = !has;
   });
 
   document.getElementById("mainPopupSet")!.appendChild(menu);

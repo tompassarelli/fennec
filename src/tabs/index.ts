@@ -19,7 +19,7 @@
 //   - the factory wiring (drag↔rows↔vim cycle handled with let-bindings)
 //   - init() bootstrap
 
-import { buildContextMenu } from "./menu.ts";
+import { buildContextMenu, buildGroupContextMenu } from "./menu.ts";
 import { makeDrag } from "./drag.ts";
 import { makeEvents } from "./events.ts";
 import { makeLayout } from "./layout.ts";
@@ -338,6 +338,13 @@ const pfxLog = createLogger("tabs");
       toggleCollapse: Rows.toggleCollapse,
       createGroupRow: Rows.createGroupRow,
       setCursor: vim.setCursor,
+      updateVisibility: Rows.updateVisibility,
+      scheduleSave,
+    });
+    buildGroupContextMenu({
+      startRename: vim.startRename,
+      toggleCollapse: Rows.toggleCollapse,
+      syncGroupRow: Rows.syncGroupRow,
       updateVisibility: Rows.updateVisibility,
       scheduleSave,
     });

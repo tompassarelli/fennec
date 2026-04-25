@@ -30,6 +30,9 @@ export const state: {
   spacer: HTMLElement;
   pinnedContainer: HTMLElement;
   contextTab: Tab | null;
+  /** Currently right-clicked group row — set by createGroupRow's contextmenu
+   *  listener before opening the pfx-group-menu. Null otherwise. */
+  contextGroupRow: Row | null;
   cursor: Row | null;
   nextTabId: number;
   /** True from startup until sessionstore-windows-restored fires. Gates the
@@ -45,6 +48,7 @@ export const state: {
   spacer: null as unknown as HTMLElement,
   pinnedContainer: null as unknown as HTMLElement,
   contextTab: null,
+  contextGroupRow: null,
   cursor: null,
   nextTabId: 1,
   inSessionRestore: true,

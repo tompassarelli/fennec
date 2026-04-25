@@ -11,6 +11,7 @@
     spacer: null,
     pinnedContainer: null,
     contextTab: null,
+    contextGroupRow: null,
     cursor: null,
     nextTabId: 1,
     inSessionRestore: true,
@@ -368,6 +369,83 @@
       muteItem.setAttribute("label", state.contextTab.hasAttribute("muted") ? "Unmute Tab" : "Mute Tab");
       pinItem.setAttribute("label", state.contextTab.pinned ? "Unpin Tab" : "Pin Tab");
       splitViewItem.hidden = !!state.contextTab.splitview;
+    });
+    document.getElementById("mainPopupSet").appendChild(menu);
+    return menu;
+  }
+  function buildGroupContextMenu(deps) {
+    const { startRename, toggleCollapse, syncGroupRow, updateVisibility, scheduleSave } = deps;
+    const menu = document.createXULElement("menupopup");
+    menu.id = "pfx-group-menu";
+    function mi(label, handler) {
+      const item = document.createXULElement("menuitem");
+      item.setAttribute("label", label);
+      item.addEventListener("command", handler);
+      return item;
+    }
+    const sep = () => document.createXULElement("menuseparator");
+    const renameItem = mi("Rename Group", () => {
+      if (state.contextGroupRow)
+        startRename(state.contextGroupRow);
+    });
+    const collapseItem = mi("Collapse", () => {
+      if (state.contextGroupRow)
+        toggleCollapse(state.contextGroupRow);
+    });
+    const closeGroupItem = mi("Close Group", () => {
+      const row = state.contextGroupRow;
+      if (!row || !row._group)
+        return;
+      const myLevel = row._group.level || 0;
+      let next = row.nextElementSibling;
+      while (next && next !== state.spacer) {
+        const lv = levelOfRow(next);
+        if (lv <= myLevel)
+          break;
+        if (next._group) {
+          next._group.level = Math.max(0, (next._group.level || 0) - 1);
+          syncGroupRow(next);
+        }
+        next = next.nextElementSibling;
+      }
+      row.remove();
+      updateVisibility();
+      scheduleSave();
+    });
+    const closeTabsItem = mi("Close Tabs in Group", () => {
+      const row = state.contextGroupRow;
+      if (!row)
+        return;
+      const tabsInGroup = subtreeRows(row).slice(1).filter((r) => r._tab).map((r) => r._tab);
+      for (let i = tabsInGroup.length - 1;i >= 0; i--) {
+        gBrowser.removeTab(tabsInGroup[i]);
+      }
+    });
+    const moveToWindowItem = mi("Move Tabs to New Window", () => {
+      const row = state.contextGroupRow;
+      if (!row)
+        return;
+      const tabsInGroup = subtreeRows(row).slice(1).filter((r) => r._tab).map((r) => r._tab);
+      if (!tabsInGroup.length)
+        return;
+      if (typeof gBrowser.replaceTabsWithWindow === "function") {
+        gBrowser.replaceTabsWithWindow(tabsInGroup);
+      } else {
+        gBrowser.replaceTabWithWindow(tabsInGroup[0]);
+      }
+    });
+    menu.append(renameItem, collapseItem, closeTabsItem, sep(), closeGroupItem, moveToWindowItem);
+    menu.addEventListener("popupshowing", () => {
+      const row = state.contextGroupRow;
+      if (!row || !row._group)
+        return;
+      const has = hasChildren(row);
+      collapseItem.hidden = !has;
+      if (has) {
+        collapseItem.setAttribute("label", row._group.collapsed ? "Expand" : "Collapse");
+      }
+      closeTabsItem.hidden = !has;
+      moveToWindowItem.hidden = !has;
     });
     document.getElementById("mainPopupSet").appendChild(menu);
     return menu;
@@ -1487,9 +1565,12 @@
         }
       });
       row.addEventListener("contextmenu", (e) => {
+        const me = e;
         e.preventDefault();
         e.stopPropagation();
-        startRename(row);
+        state.contextGroupRow = row;
+        const menu = document.getElementById("pfx-group-menu");
+        menu?.openPopupAtScreen(me.screenX, me.screenY, true);
       });
       setupDrag(row);
       syncGroupRow(row);
@@ -2971,6 +3052,13 @@
       toggleCollapse: Rows.toggleCollapse,
       createGroupRow: Rows.createGroupRow,
       setCursor: vim.setCursor,
+      updateVisibility: Rows.updateVisibility,
+      scheduleSave
+    });
+    buildGroupContextMenu({
+      startRename: vim.startRename,
+      toggleCollapse: Rows.toggleCollapse,
+      syncGroupRow: Rows.syncGroupRow,
       updateVisibility: Rows.updateVisibility,
       scheduleSave
     });
