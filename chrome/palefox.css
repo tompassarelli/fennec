@@ -119,6 +119,12 @@
 /* #region toolbar-menubar — hidden by default
  * Set pfx.sidebar.menuBar to true in about:config to show. */
 
+/* New-tab toolbar button — hidden by default.
+ * Set pfx.toolbar.newTabButton to true in about:config to show. */
+@media not -moz-pref("pfx.toolbar.newTabButton") {
+  #new-tab-button { display: none !important; }
+}
+
 @media not -moz-pref("pfx.sidebar.menuBar") {
   #toolbar-menubar {
     display: none !important;
