@@ -2456,6 +2456,8 @@
     function setupVimKeys() {
       state.panel.setAttribute("tabindex", "0");
       document.addEventListener("keydown", (e) => {
+        if (pickerActive)
+          return;
         if (!panelActive)
           return;
         const active = document.activeElement;
@@ -2490,6 +2492,174 @@
         if (panelActive)
           blurPanel();
       });
+    }
+    let pickerEl = null;
+    let pickerInput = null;
+    let pickerList = null;
+    let pickerActive = false;
+    let pickerItems = [];
+    let pickerFiltered = [];
+    let pickerSelectedIdx = 0;
+    let pickerOnSelect = null;
+    function ensurePickerBuilt() {
+      if (pickerEl)
+        return;
+      pickerEl = document.createXULElement("vbox");
+      pickerEl.id = "pfx-picker";
+      pickerEl.hidden = true;
+      pickerEl.setAttribute("aria-modal", "true");
+      const inputBox = document.createXULElement("hbox");
+      inputBox.className = "pfx-picker-input-box";
+      const prompt = document.createXULElement("label");
+      prompt.className = "pfx-picker-prompt";
+      prompt.setAttribute("value", "›");
+      pickerInput = document.createElement("input");
+      pickerInput.className = "pfx-picker-input";
+      pickerInput.placeholder = "Filter…";
+      inputBox.append(prompt, pickerInput);
+      pickerList = document.createXULElement("vbox");
+      pickerList.className = "pfx-picker-list";
+      pickerEl.append(inputBox, pickerList);
+      document.documentElement.appendChild(pickerEl);
+      pickerInput.addEventListener("input", () => {
+        const q = pickerInput.value.trim().toLowerCase();
+        pickerFiltered = !q ? [...pickerItems] : pickerItems.filter((it) => it.display.toLowerCase().includes(q));
+        pickerSelectedIdx = 0;
+        renderPickerList();
+      });
+      pickerInput.addEventListener("keydown", (e) => {
+        if (!pickerActive)
+          return;
+        switch (e.key) {
+          case "Escape":
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            dismissPicker();
+            return;
+          case "Enter":
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            commitPicker();
+            return;
+          case "ArrowDown":
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            movePickerSelection(1);
+            return;
+          case "ArrowUp":
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            movePickerSelection(-1);
+            return;
+          case "j":
+            if (e.ctrlKey) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              movePickerSelection(1);
+              return;
+            }
+            break;
+          case "k":
+            if (e.ctrlKey) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              movePickerSelection(-1);
+              return;
+            }
+            break;
+          case "n":
+            if (e.ctrlKey) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              movePickerSelection(1);
+              return;
+            }
+            break;
+          case "p":
+            if (e.ctrlKey) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              movePickerSelection(-1);
+              return;
+            }
+            break;
+        }
+      }, true);
+    }
+    function renderPickerList() {
+      if (!pickerList)
+        return;
+      while (pickerList.firstChild)
+        pickerList.firstChild.remove();
+      if (!pickerFiltered.length) {
+        const empty = document.createXULElement("label");
+        empty.className = "pfx-picker-empty";
+        empty.setAttribute("value", "(no matches)");
+        pickerList.appendChild(empty);
+        return;
+      }
+      pickerFiltered.forEach((item, idx) => {
+        const row = document.createXULElement("hbox");
+        row.className = "pfx-picker-row";
+        if (idx === pickerSelectedIdx)
+          row.setAttribute("pfx-picker-selected", "true");
+        const label = document.createXULElement("label");
+        label.className = "pfx-picker-label";
+        label.setAttribute("value", item.display);
+        label.setAttribute("flex", "1");
+        label.setAttribute("crop", "end");
+        row.appendChild(label);
+        row.addEventListener("click", () => {
+          pickerSelectedIdx = idx;
+          commitPicker();
+        });
+        pickerList.appendChild(row);
+      });
+      const selected = pickerList.querySelector("[pfx-picker-selected='true']");
+      selected?.scrollIntoView({ block: "nearest" });
+    }
+    function movePickerSelection(delta) {
+      if (!pickerFiltered.length)
+        return;
+      pickerSelectedIdx = (pickerSelectedIdx + delta + pickerFiltered.length) % pickerFiltered.length;
+      renderPickerList();
+    }
+    function commitPicker() {
+      const item = pickerFiltered[pickerSelectedIdx];
+      const cb = pickerOnSelect;
+      dismissPicker();
+      if (item && cb)
+        cb(item);
+    }
+    function dismissPicker() {
+      if (!pickerActive)
+        return;
+      pickerActive = false;
+      pickerOnSelect = null;
+      if (pickerEl)
+        pickerEl.hidden = true;
+      if (state.panel)
+        state.panel.focus();
+    }
+    function showPicker(opts) {
+      ensurePickerBuilt();
+      if (!pickerEl || !pickerInput || !pickerList)
+        return;
+      pickerItems = opts.items;
+      pickerFiltered = [...opts.items];
+      pickerSelectedIdx = 0;
+      pickerOnSelect = opts.onSelect;
+      pickerActive = true;
+      const promptEl = pickerEl.querySelector(".pfx-picker-prompt");
+      if (promptEl && opts.prompt) {
+        promptEl.setAttribute("value", opts.prompt);
+      } else if (promptEl) {
+        promptEl.setAttribute("value", "›");
+      }
+      pickerInput.value = "";
+      renderPickerList();
+      pickerEl.hidden = false;
+      pickerInput.focus();
     }
     function focusContent() {
       gBrowser.selectedBrowser.focus();
@@ -2974,14 +3144,25 @@
           const arg = args.slice(1).join(" ").trim();
           (async () => {
             try {
-              const tagged = await history.getTagged(50);
+              const tagged = await history.getTagged(100);
               if (!tagged.length) {
                 modelineMsg("No tagged sessions yet — :checkpoint or quit Firefox to create one", 4000);
                 return;
               }
               if (!arg) {
-                const head = tagged.slice(0, 5).map((e) => labelOf(e.tag) ?? "?").join(" │ ");
-                modelineMsg(`Tagged: ${head}${tagged.length > 5 ? " …" : ""}`, 6000);
+                showPicker({
+                  prompt: "restore ›",
+                  items: tagged.map((e) => ({ display: summarizeEvent(e), data: e })),
+                  onSelect: async (item) => {
+                    const ev = item.data;
+                    try {
+                      await restoreEvent(ev);
+                      modelineMsg(`Restored: ${labelOf(ev.tag)}`, 4000);
+                    } catch (e) {
+                      modelineMsg(`:restore failed: ${e.message}`, 4000);
+                    }
+                  }
+                });
                 return;
               }
               const needle = arg.toLowerCase();
@@ -3003,13 +3184,24 @@
           const q = args.slice(1).join(" ").trim();
           (async () => {
             try {
-              const evs = q ? await history.search(q, { taggedOnly: true, limit: 20 }) : await history.getTagged(20);
+              const evs = q ? await history.search(q, { taggedOnly: true, limit: 100 }) : await history.getTagged(100);
               if (!evs.length) {
                 modelineMsg(q ? `No sessions match "${q}"` : "No sessions yet", 3000);
                 return;
               }
-              const summary = evs.slice(0, 5).map(summarizeEvent).join(" │ ");
-              modelineMsg(`Sessions: ${summary}${evs.length > 5 ? " …" : ""}`, 8000);
+              showPicker({
+                prompt: "sessions ›",
+                items: evs.map((e) => ({ display: summarizeEvent(e), data: e })),
+                onSelect: async (item) => {
+                  const ev = item.data;
+                  try {
+                    await restoreEvent(ev);
+                    modelineMsg(`Restored: ${labelOf(ev.tag)}`, 4000);
+                  } catch (e) {
+                    modelineMsg(`:sessions restore failed: ${e.message}`, 4000);
+                  }
+                }
+              });
             } catch (e) {
               modelineMsg(`:sessions failed: ${e.message}`, 4000);
             }
@@ -3020,13 +3212,25 @@
           const q = args.slice(1).join(" ").trim();
           (async () => {
             try {
-              const evs = q ? await history.search(q, { taggedOnly: false, limit: 20 }) : await history.getRecent(20);
+              const evs = q ? await history.search(q, { taggedOnly: false, limit: 100 }) : await history.getRecent(100);
               if (!evs.length) {
                 modelineMsg(q ? `No events match "${q}"` : "No history yet", 3000);
                 return;
               }
-              const summary = evs.slice(0, 5).map(summarizeEvent).join(" │ ");
-              modelineMsg(`History: ${summary}${evs.length > 5 ? " …" : ""}`, 8000);
+              showPicker({
+                prompt: "history ›",
+                items: evs.map((e) => ({ display: summarizeEvent(e), data: e })),
+                onSelect: async (item) => {
+                  const ev = item.data;
+                  try {
+                    await restoreEvent(ev);
+                    const label = labelOf(ev.tag);
+                    modelineMsg(`Restored: ${label ?? new Date(ev.timestamp).toLocaleString()}`, 4000);
+                  } catch (e) {
+                    modelineMsg(`:history restore failed: ${e.message}`, 4000);
+                  }
+                }
+              });
             } catch (e) {
               modelineMsg(`:history failed: ${e.message}`, 4000);
             }

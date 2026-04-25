@@ -478,3 +478,85 @@
 }
 
 /* #endregion horizontal mode */
+
+
+/* #region picker — fzf-style overlay for :history / :sessions / :restore
+ *
+ * Built lazily by src/tabs/vim.ts:ensurePickerBuilt(). One picker
+ * element lives in the chrome doc; show/hide via .hidden. Position is
+ * fixed, anchored to bottom-center, fits in the viewport with sane
+ * max-height + scrollable list. */
+
+#pfx-picker {
+  position: fixed !important;
+  left: 50% !important;
+  bottom: 32px !important;
+  transform: translateX(-50%) !important;
+  z-index: 9999 !important;
+  width: min(720px, 90vw) !important;
+  max-height: 60vh !important;
+  background: var(--pfx-bg-elevated) !important;
+  color: var(--pfx-fg) !important;
+  border: 1px solid var(--pfx-border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.32) !important;
+  font-family: var(--pfx-font, system-ui, sans-serif) !important;
+  font-size: 13px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+#pfx-picker[hidden] { display: none !important; }
+
+#pfx-picker .pfx-picker-input-box {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 10px 14px !important;
+  border-bottom: 1px solid var(--pfx-border) !important;
+}
+
+#pfx-picker .pfx-picker-prompt {
+  color: var(--pfx-accent) !important;
+  font-weight: 600 !important;
+}
+
+#pfx-picker .pfx-picker-input {
+  flex: 1 !important;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  color: var(--pfx-fg) !important;
+  font: inherit !important;
+}
+
+#pfx-picker .pfx-picker-list {
+  flex: 1 !important;
+  overflow-y: auto !important;
+  padding: 4px 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+#pfx-picker .pfx-picker-row {
+  padding: 6px 14px !important;
+  cursor: pointer !important;
+  display: flex !important;
+}
+
+#pfx-picker .pfx-picker-row[pfx-picker-selected="true"] {
+  background: color-mix(in srgb, var(--pfx-accent) 15%, transparent) !important;
+}
+
+#pfx-picker .pfx-picker-row:hover:not([pfx-picker-selected="true"]) {
+  background: color-mix(in srgb, var(--pfx-fg) 6%, transparent) !important;
+}
+
+#pfx-picker .pfx-picker-empty {
+  padding: 16px 14px !important;
+  color: var(--pfx-fg-muted) !important;
+  font-style: italic !important;
+}
+
+/* #endregion picker */

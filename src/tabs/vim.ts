@@ -498,6 +498,12 @@ export function makeVim(deps: VimDeps): VimAPI {
     state.panel.setAttribute("tabindex", "0");
 
     document.addEventListener("keydown", (e) => {
+      // Picker takes precedence over everything else when it's up.
+      // Its own keydown handler in showPicker() runs in capture phase,
+      // so by the time we get here the picker has already consumed
+      // anything it cares about. Just bail.
+      if (pickerActive) return;
+
       if (!panelActive) return;
 
       // Auto-deactivate if focus moved to an input (urlbar, findbar, etc.)
@@ -543,6 +549,215 @@ export function makeVim(deps: VimDeps): VimAPI {
     gBrowser.tabpanels.addEventListener("mousedown", () => {
       if (panelActive) blurPanel();
     });
+  }
+
+  // ---------- Picker (fzf-style overlay) ------------------------------------
+  //
+  // Rich list UI for `:history`, `:sessions`, `:restore` (bare). Built as a
+  // chrome-document overlay (positioned fixed bottom). Type-to-filter,
+  // arrow keys / j/k to navigate, Enter to select, Esc to dismiss.
+  //
+  // We keep the modeline for short toasts and ex-input. The picker is the
+  // place for browsing data — emacs-style minibuffer + completion buffer
+  // in one panel.
+
+  interface PickerItem {
+    /** Short text shown to the user. Whitespace and case-insensitive
+     *  substring filter runs against this. */
+    readonly display: string;
+    /** Pass-through for the onSelect callback. Could be an event id, a
+     *  full HistoryEvent, anything the caller wants. */
+    readonly data: unknown;
+  }
+
+  let pickerEl: HTMLElement | null = null;
+  let pickerInput: HTMLInputElement | null = null;
+  let pickerList: HTMLElement | null = null;
+  let pickerActive = false;
+  let pickerItems: readonly PickerItem[] = [];
+  let pickerFiltered: PickerItem[] = [];
+  let pickerSelectedIdx = 0;
+  let pickerOnSelect: ((item: PickerItem) => unknown) | null = null;
+
+  /** Build the picker DOM lazily. After build it lives in the chrome doc
+   *  (display:none) and gets reused on each show. */
+  function ensurePickerBuilt(): void {
+    if (pickerEl) return;
+    pickerEl = document.createXULElement("vbox") as HTMLElement;
+    pickerEl.id = "pfx-picker";
+    pickerEl.hidden = true;
+    pickerEl.setAttribute("aria-modal", "true");
+
+    // Input field at top.
+    const inputBox = document.createXULElement("hbox") as HTMLElement;
+    inputBox.className = "pfx-picker-input-box";
+    const prompt = document.createXULElement("label") as HTMLElement;
+    prompt.className = "pfx-picker-prompt";
+    prompt.setAttribute("value", "›");
+    pickerInput = document.createElement("input");
+    pickerInput.className = "pfx-picker-input";
+    pickerInput.placeholder = "Filter…";
+    inputBox.append(prompt, pickerInput);
+
+    // Scrollable list below.
+    pickerList = document.createXULElement("vbox") as HTMLElement;
+    pickerList.className = "pfx-picker-list";
+
+    pickerEl.append(inputBox, pickerList);
+    document.documentElement.appendChild(pickerEl);
+
+    // Filter on input.
+    pickerInput.addEventListener("input", () => {
+      const q = pickerInput!.value.trim().toLowerCase();
+      pickerFiltered = !q
+        ? [...pickerItems]
+        : pickerItems.filter((it) => it.display.toLowerCase().includes(q));
+      pickerSelectedIdx = 0;
+      renderPickerList();
+    });
+
+    // Keys (capture phase so we win against vim handler).
+    pickerInput.addEventListener("keydown", (e) => {
+      if (!pickerActive) return;
+      switch (e.key) {
+        case "Escape":
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          dismissPicker();
+          return;
+        case "Enter":
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          commitPicker();
+          return;
+        case "ArrowDown":
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          movePickerSelection(1);
+          return;
+        case "ArrowUp":
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          movePickerSelection(-1);
+          return;
+        // Ctrl+J / Ctrl+K for vim-flavored navigation without leaving the
+        // input field. Plain j/k would interfere with typing the filter.
+        case "j":
+          if (e.ctrlKey) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            movePickerSelection(1);
+            return;
+          }
+          break;
+        case "k":
+          if (e.ctrlKey) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            movePickerSelection(-1);
+            return;
+          }
+          break;
+        case "n":
+          if (e.ctrlKey) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            movePickerSelection(1);
+            return;
+          }
+          break;
+        case "p":
+          if (e.ctrlKey) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            movePickerSelection(-1);
+            return;
+          }
+          break;
+      }
+      // Otherwise fall through — input field handles typing naturally.
+    }, true);
+  }
+
+  function renderPickerList(): void {
+    if (!pickerList) return;
+    while (pickerList.firstChild) pickerList.firstChild.remove();
+    if (!pickerFiltered.length) {
+      const empty = document.createXULElement("label") as HTMLElement;
+      empty.className = "pfx-picker-empty";
+      empty.setAttribute("value", "(no matches)");
+      pickerList.appendChild(empty);
+      return;
+    }
+    pickerFiltered.forEach((item, idx) => {
+      const row = document.createXULElement("hbox") as HTMLElement;
+      row.className = "pfx-picker-row";
+      if (idx === pickerSelectedIdx) row.setAttribute("pfx-picker-selected", "true");
+      const label = document.createXULElement("label") as HTMLElement;
+      label.className = "pfx-picker-label";
+      label.setAttribute("value", item.display);
+      label.setAttribute("flex", "1");
+      label.setAttribute("crop", "end");
+      row.appendChild(label);
+      row.addEventListener("click", () => {
+        pickerSelectedIdx = idx;
+        commitPicker();
+      });
+      pickerList!.appendChild(row);
+    });
+    // Scroll selected into view.
+    const selected = pickerList.querySelector("[pfx-picker-selected='true']");
+    selected?.scrollIntoView({ block: "nearest" });
+  }
+
+  function movePickerSelection(delta: number): void {
+    if (!pickerFiltered.length) return;
+    pickerSelectedIdx = (pickerSelectedIdx + delta + pickerFiltered.length) % pickerFiltered.length;
+    renderPickerList();
+  }
+
+  function commitPicker(): void {
+    const item = pickerFiltered[pickerSelectedIdx];
+    const cb = pickerOnSelect;
+    dismissPicker();
+    if (item && cb) cb(item);
+  }
+
+  function dismissPicker(): void {
+    if (!pickerActive) return;
+    pickerActive = false;
+    pickerOnSelect = null;
+    if (pickerEl) pickerEl.hidden = true;
+    // Restore vim panel focus if it was active before the picker.
+    if (state.panel) state.panel.focus();
+  }
+
+  /** Public picker API. Show a list, get back the user's pick. */
+  function showPicker(opts: {
+    items: readonly PickerItem[];
+    onSelect: (item: PickerItem) => unknown;
+    prompt?: string;
+  }): void {
+    ensurePickerBuilt();
+    if (!pickerEl || !pickerInput || !pickerList) return;
+    pickerItems = opts.items;
+    pickerFiltered = [...opts.items];
+    pickerSelectedIdx = 0;
+    pickerOnSelect = opts.onSelect;
+    pickerActive = true;
+
+    // Update the prompt label if provided.
+    const promptEl = pickerEl.querySelector(".pfx-picker-prompt");
+    if (promptEl && opts.prompt) {
+      promptEl.setAttribute("value", opts.prompt);
+    } else if (promptEl) {
+      promptEl.setAttribute("value", "›");
+    }
+
+    pickerInput.value = "";
+    renderPickerList();
+    pickerEl.hidden = false;
+    pickerInput.focus();
   }
 
   function focusContent(): void {
@@ -973,20 +1188,30 @@ export function makeVim(deps: VimDeps): VimAPI {
       }
       case "restore": {
         // :restore [<label-substring>] — restore a tagged session.
-        // No arg: list recent tagged points to the modeline.
-        // With arg: substring-match against tag labels; restore exact match.
+        // No arg: open the picker over tagged points; user picks one.
+        // With arg: substring-match against tag labels; restore most recent match.
         const arg = args.slice(1).join(" ").trim();
         (async () => {
           try {
-            const tagged = await history.getTagged(50);
+            const tagged = await history.getTagged(100);
             if (!tagged.length) {
               modelineMsg("No tagged sessions yet — :checkpoint or quit Firefox to create one", 4000);
               return;
             }
             if (!arg) {
-              // List 5 most recent.
-              const head = tagged.slice(0, 5).map((e) => labelOf(e.tag) ?? "?").join(" │ ");
-              modelineMsg(`Tagged: ${head}${tagged.length > 5 ? " …" : ""}`, 6000);
+              showPicker({
+                prompt: "restore ›",
+                items: tagged.map((e) => ({ display: summarizeEvent(e), data: e })),
+                onSelect: async (item) => {
+                  const ev = item.data as import("./history.ts").HistoryEvent;
+                  try {
+                    await restoreEvent(ev);
+                    modelineMsg(`Restored: ${labelOf(ev.tag)}`, 4000);
+                  } catch (e) {
+                    modelineMsg(`:restore failed: ${(e as Error).message}`, 4000);
+                  }
+                },
+              });
               return;
             }
             const needle = arg.toLowerCase();
@@ -995,7 +1220,7 @@ export function makeVim(deps: VimDeps): VimAPI {
               modelineMsg(`No sessions match "${arg}"`, 3000);
               return;
             }
-            const target = matches[0]!; // most recent match
+            const target = matches[0]!;
             await restoreEvent(target);
             modelineMsg(`Restored: ${labelOf(target.tag)}`, 4000);
           } catch (e) {
@@ -1005,19 +1230,30 @@ export function makeVim(deps: VimDeps): VimAPI {
         break;
       }
       case "sessions": {
-        // :sessions [<query>] — list/search tagged points.
+        // :sessions [<query>] — picker over tagged points (with optional FTS pre-filter).
         const q = args.slice(1).join(" ").trim();
         (async () => {
           try {
             const evs = q
-              ? await history.search(q, { taggedOnly: true, limit: 20 })
-              : await history.getTagged(20);
+              ? await history.search(q, { taggedOnly: true, limit: 100 })
+              : await history.getTagged(100);
             if (!evs.length) {
               modelineMsg(q ? `No sessions match "${q}"` : "No sessions yet", 3000);
               return;
             }
-            const summary = evs.slice(0, 5).map(summarizeEvent).join(" │ ");
-            modelineMsg(`Sessions: ${summary}${evs.length > 5 ? " …" : ""}`, 8000);
+            showPicker({
+              prompt: "sessions ›",
+              items: evs.map((e) => ({ display: summarizeEvent(e), data: e })),
+              onSelect: async (item) => {
+                const ev = item.data as import("./history.ts").HistoryEvent;
+                try {
+                  await restoreEvent(ev);
+                  modelineMsg(`Restored: ${labelOf(ev.tag)}`, 4000);
+                } catch (e) {
+                  modelineMsg(`:sessions restore failed: ${(e as Error).message}`, 4000);
+                }
+              },
+            });
           } catch (e) {
             modelineMsg(`:sessions failed: ${(e as Error).message}`, 4000);
           }
@@ -1025,19 +1261,31 @@ export function makeVim(deps: VimDeps): VimAPI {
         break;
       }
       case "history": {
-        // :history [<query>] — search ALL events, tagged or not.
+        // :history [<query>] — picker over ALL events, tagged or not.
         const q = args.slice(1).join(" ").trim();
         (async () => {
           try {
             const evs = q
-              ? await history.search(q, { taggedOnly: false, limit: 20 })
-              : await history.getRecent(20);
+              ? await history.search(q, { taggedOnly: false, limit: 100 })
+              : await history.getRecent(100);
             if (!evs.length) {
               modelineMsg(q ? `No events match "${q}"` : "No history yet", 3000);
               return;
             }
-            const summary = evs.slice(0, 5).map(summarizeEvent).join(" │ ");
-            modelineMsg(`History: ${summary}${evs.length > 5 ? " …" : ""}`, 8000);
+            showPicker({
+              prompt: "history ›",
+              items: evs.map((e) => ({ display: summarizeEvent(e), data: e })),
+              onSelect: async (item) => {
+                const ev = item.data as import("./history.ts").HistoryEvent;
+                try {
+                  await restoreEvent(ev);
+                  const label = labelOf(ev.tag);
+                  modelineMsg(`Restored: ${label ?? new Date(ev.timestamp).toLocaleString()}`, 4000);
+                } catch (e) {
+                  modelineMsg(`:history restore failed: ${(e as Error).message}`, 4000);
+                }
+              },
+            });
           } catch (e) {
             modelineMsg(`:history failed: ${(e as Error).message}`, 4000);
           }

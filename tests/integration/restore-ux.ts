@@ -19,6 +19,17 @@ async function waitFor(
   throw new Error(`timed out waiting for: ${scriptReturningBool.slice(0, 120)}`);
 }
 
+const DISMISS_PICKER_IF_OPEN = `
+  const p = document.getElementById("pfx-picker");
+  if (p && !p.hidden) {
+    const inp = p.querySelector(".pfx-picker-input");
+    inp?.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Escape", bubbles: true, cancelable: true, view: window,
+    }));
+  }
+  return true;
+`;
+
 const ACTIVATE_VIM_ON_FIRST_ROW = `
   const row = document.querySelector(${"`"}.pfx-tab-row${"`"});
   if (!row) throw new Error("no .pfx-tab-row found");
@@ -97,38 +108,41 @@ const tests: IntegrationTest[] = [
   },
 
   {
-    name: "restore-ux: :sessions lists tagged points",
+    name: "restore-ux: :sessions opens a picker listing tagged points",
     async run(mn) {
       // We've already created at least 2 checkpoints in prior tests; verify
-      // they're listed in :sessions output.
+      // running :sessions opens the picker and populates rows.
       await mn.executeScript(ACTIVATE_VIM_ON_FIRST_ROW);
       await waitFor(mn, `return !!document.querySelector(".pfx-tab-row[pfx-cursor]");`);
       await mn.executeScript(runEx("sessions"));
-      // The handler renders into the modeline; wait for it to appear.
-      await waitFor(
-        mn,
-        `
-        const ml = document.querySelector(".pfx-modeline-msg, [pfx-modeline-msg]") ||
-                   document.querySelector("#pfx-tab-panel-modeline") ||
-                   document.querySelector(".pfx-modeline");
-        // We don't assert on a specific element since the modeline structure
-        // is internal. Instead, verify pfxTest can confirm via API the same
-        // call returns tagged points.
+      // Picker should appear with rows.
+      await waitFor(mn, `
+        const p = document.getElementById("pfx-picker");
+        if (!p || p.hidden) return false;
+        return p.querySelectorAll(".pfx-picker-row").length > 0;
+      `, 3000);
+      // Dismiss so subsequent tests aren't blocked by the picker capture.
+      await mn.executeScript(`
+        const inp = document.querySelector("#pfx-picker .pfx-picker-input");
+        inp?.dispatchEvent(new KeyboardEvent("keydown", {
+          key: "Escape", bubbles: true, cancelable: true, view: window,
+        }));
         return true;
-        `,
-        2000,
-      );
-      const list = await mn.executeAsyncScript<number>(`
-        const cb = arguments[arguments.length - 1];
-        window.pfxTest.history.getTagged(20).then((evs) => cb(evs.length));
       `);
-      if (list < 1) throw new Error(":sessions had nothing to show — getTagged returned 0");
+      await waitFor(mn, `
+        const p = document.getElementById("pfx-picker");
+        return !p || p.hidden;
+      `, 2000);
     },
   },
 
   {
     name: "restore-ux: :restore <label> reopens saved tabs under a synthetic group",
     async run(mn) {
+      // Defensive: dismiss any leftover picker from prior tests so the
+      // `:` key dispatch reaches the ex-mode handler.
+      await mn.executeScript(DISMISS_PICKER_IF_OPEN);
+
       // First, create a checkpoint with a known marker tab. Set the tab's
       // name so it's unmistakable post-restore.
       await mn.executeScript(`
