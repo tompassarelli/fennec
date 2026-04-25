@@ -621,6 +621,14 @@ export function makeCompact(deps: CompactDeps): CompactAPI {
       urlbar.removeAttribute("popover");
       urlbarCompactObserverHz = new MutationObserver(() => {
         if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal")) return;
+        // Floating urlbar owns popover state — see src/drawer/urlbar.ts.
+        // Without this bail, breakout-close on Enter strips popover before
+        // urlbar.ts removes the floating attr, so during one frame the
+        // still-pinned urlbar (top:22vh) is interpreted relative to the
+        // navigator-toolbox's translateY(-100%) transform → ~200px upward
+        // shift visible until deactivate fires. Vertical's observer has the
+        // same bail; we'd missed it here because translateX hides the bug.
+        if (document.documentElement.hasAttribute("pfx-urlbar-floating")) return;
         if (urlbar.hasAttribute("breakout-extend")) {
           urlbar.setAttribute("popover", "manual");
           if (!urlbar.matches(":popover-open")) (urlbar as any).showPopover();

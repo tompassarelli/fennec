@@ -542,6 +542,8 @@
         urlbarCompactObserverHz = new MutationObserver(() => {
           if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal"))
             return;
+          if (document.documentElement.hasAttribute("pfx-urlbar-floating"))
+            return;
           if (urlbar.hasAttribute("breakout-extend")) {
             urlbar.setAttribute("popover", "manual");
             if (!urlbar.matches(":popover-open"))
