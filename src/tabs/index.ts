@@ -31,6 +31,7 @@ import {
 import { createLogger } from "./log.ts";
 import { makeHistory, type HistoryAPI } from "./history.ts";
 import { makeContentFocus, type ContentFocusAPI } from "./content-focus.ts";
+import { makePalefox, type PalefoxAPI } from "../platform/index.ts";
 import { makeSaver } from "./snapshot.ts";
 import {
   closedTabs, rowOf, savedTabQueue, selection, state, treeOf,
@@ -111,6 +112,13 @@ const pfxLog = createLogger("tabs");
   // Vimium uses (lib/dom_utils.js) and forward a boolean back. Used by
   // setupGlobalKeys() to bail palefox keymap when content is editing.
   const contentFocus: ContentFocusAPI = makeContentFocus();
+
+  // Palefox semantic platform layer — `Palefox.windows.current().tabs.*`,
+  // scheduler + tabs reconciler. See src/platform/index.ts and the
+  // strategy doc. New feature code SHOULD import via this surface; legacy
+  // code continues to mutate gBrowser directly until M2 migrates it.
+  const Palefox: PalefoxAPI = makePalefox();
+  (window as unknown as { Palefox: PalefoxAPI }).Palefox = Palefox;
 
   // Write-on-every-change: pulls a fresh snapshot for every flush, coalesces
   // overlapping schedules, hands off to history (which dedupes by content
@@ -427,6 +435,7 @@ const pfxLog = createLogger("tabs");
       clearInterval(retentionTimer);
       history.close().catch(() => {});
       contentFocus.destroy();
+      Palefox.destroy();
     }, { once: true });
 
     // Test-only debug API. Gated on `pfx.test.exposeAPI` so production
@@ -474,6 +483,8 @@ const pfxLog = createLogger("tabs");
         // Bridge probe — true iff content reports an editable focused element.
         contentInputFocused() { return contentFocus.contentInputFocused(); },
         contentFocusDiag() { return contentFocus.diag(); },
+        // Semantic platform layer (M4 + M5 phase 1).
+        Palefox,
       };
       console.log("palefox-tabs: pfxTest debug API exposed");
     }

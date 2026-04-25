@@ -26,19 +26,33 @@ multi-PR arcs and architectural commitments.
 
 ## Status check (2026-04-26)
 
-After the ambitious M1 + M3 + M7.1 push, the repo state is:
+After the M1 + M3 + M7.1 push and the M4 + M5.1 platform-layer push:
 
 - **All Bucket-A (Tier 0) Firefox primitives have a typed adapter** in
-  `src/firefox/*` — prefs, observers, files, dom, window, tabs.
+  `src/firefox/*`.
 - **Zero `@ts-nocheck` files** in `src/`.
-- **`src/drawer/index.ts`** is a 65-line orchestrator that wires six
-  typed factories. Every drawer-side concern (layout, drag-overlay,
-  compact, urlbar, sidebar-button, banner) is its own factory file.
-- **Picker** is its own factory (`src/tabs/picker.ts`), making `vim.ts`
-  ~370 lines smaller and the picker mockable for future Tier 1 tests.
+- **`src/drawer/index.ts`** is a 65-line orchestrator wiring six factories.
+- **Picker** is its own factory (`src/tabs/picker.ts`).
+- **Scheduler + tabs reconciler shipped** under `src/platform/`. Dirty-flag
+  protocol + microtask coalescing + `flush()` consistency boundary all
+  verified live in Firefox.
+- **Semantic layer M5.1 shipped:** `Palefox.windows.current().tabs.*` is
+  available on `window.Palefox` with full read + mutate API. 6 Tier 3
+  tests verify end-to-end.
+- **Multi-instance foundation:** doctrine commits to per-record
+  `instanceId` in persisted state, per-profile DBs aggregated at read
+  time, scope-parameterized APIs. Implementation lands with M6.
 
-What's left in the roadmap is mostly the *semantic* layer + migration of
-existing call sites. All architectural foundations are in place.
+What's left:
+- M2 — strangler-fig migration of existing callsites into adapters /
+  semantic layer (largest remaining work).
+- M4.2 / M4.3 — move event-handler logic INTO the tabs reconciler;
+  recast compact mode as a sidebar reconciler.
+- M5.3 — persisted APIs (`Palefox.history.*`, `.sessions.*`, `.checkpoints.*`).
+- M5.4 / M12 — events bus, cross-window aggregator.
+- M6 — snapshot format with `instanceId`.
+- M7.2 / M7.3 — `vim.ts` ex-mode and global-keys split.
+- M11 — cross-instance history.
 
 ---
 
@@ -129,83 +143,173 @@ banks that exercise layout + sidebar-button + compact wiring together.
 
 ---
 
-## M4 — Reconciler pattern   ⚪
+## M4 — Reconciler pattern (skeleton)   🟢
 
-Generalize the `rows.scheduleTreeResync` pattern across the platform
-layer. Events become invalidation signals, not state-truth.
+Phase 1 shipped. Scheduler + first domain reconciler + verification
+tests are live. The architecture is in place; existing event handlers
+in `src/tabs/events.ts` continue to mutate `treeOf` directly until
+M2 migrates the rebuild logic into the tabs reconciler.
 
-Scope:
+Shipped:
 
-- `src/platform/palefox/reconciler.ts` — generic invalidation queue.
-  Coalesces multiple "dirty" reasons into one reconcile pass per tick.
-- Refactor `rows.scheduleTreeResync` to use the reconciler.
-- Compact-mode state machine — recast as "events mark sidebar dirty,
-  reconciler re-derives `pfx-has-hover` from cursor + breakout +
-  floating + ignoreNextHover." This is the architectural answer to
-  the v0.40.0 horizontal-mode race; race windows go away because
-  state is always re-read, never patched.
+- `src/platform/scheduler.ts` — central scheduler with the
+  dirty-flag protocol, microtask coalescing, declared-order
+  reconciler runs (prefs → windows → tabs → snapshots → sidebar →
+  command), `flush()` for consistency-sensitive callers, `diag()`
+  for debugging.
+- `src/platform/tabs-reconciler.ts` — wraps `gBrowser.tabContainer`
+  events (`TabOpen`/`TabClose`/`TabMove`/`TabSelect`/`TabAttrModified`/
+  `TabPinned`/`TabUnpinned`) into `markDirty("tabs", reason)`.
+  Reconciler currently logs reasons; rebuild logic stays in
+  `src/tabs/events.ts` until M2 migrates.
 
-**Defers:** full migration of every state mutation to reconciler-style
-(M5+).
+What's deferred to follow-on milestones:
 
-**Unlocks:** Class C/D breakage class becomes much harder to
-reintroduce. Tier 3 tests can assert "after these events, model
-matches truth" instead of "events fired in this exact order."
+- **M4.2** — move `treeOf` rebuild logic from `events.ts` into
+  the tabs reconciler. Today the events file mutates the tree
+  directly; the reconciler will own the rebuild from `gBrowser.tabs`.
+- **M4.3** — recast compact-mode state machine as a sidebar
+  reconciler that re-derives `pfx-has-hover` from cursor +
+  breakout-extend + floating + ignoreNextHover on every dirty
+  signal. Architectural answer to the v0.40.0 horizontal race.
+
+**Unlocks (already):** the M5 semantic API has somewhere sane to
+send dirty-state updates. New code can `markDirty(...)` instead of
+mutating model directly. Tier 3 tests can drive flush() and assert
+end-state.
 
 ---
 
-## M5 — Palefox semantic layer (`src/platform/palefox/*`)   ⚪
+## M5 — Palefox semantic layer   🟢 (M5.1 + M5.2 done)
 
 Build the capability API. Feature code stops talking to
-`src/firefox/*` and starts talking to `Palefox.*`.
+`src/firefox/*` directly and starts talking to `Palefox.*`.
 
-Scope (probably multiple PRs — these are sub-milestones):
+### M5.1 — `Palefox.windows.current().tabs.*`   ✅
 
-- **M5.1** `Palefox.tabs.*` — list, get, select, pin/unpin, move (with
-  intent), close, duplicate, reload. Backed by `src/firefox/tabs.ts`.
-- **M5.2** `Palefox.windows.*` — current, list, snapshot, reconcile.
-  Cross-window state question (window-scoped vs global) gets answered
-  here.
-- **M5.3** `Palefox.events.on(...)` — normalized event names
-  (`tab:created` / `tab:selected` / `window:reconciled` / …). Replaces
-  raw `TabOpen` listeners.
-- **M5.4** `Palefox.prefs.*`, `Palefox.files.*` — thin domain wrappers
-  over M1 adapters.
+Shipped. Window-scoped tabs API per the architectural decision:
+live state is window-scoped, NOT a naked global.
 
-Once M5 lands, the rule in CLAUDE.md tightens: feature code imports
-from `src/platform/palefox/*` first; falls back to `src/firefox/*`
-only if the capability genuinely doesn't exist yet (and that's a hint
-to add it to the semantic layer).
+- `src/platform/window-tabs.ts` — `WindowTabsAPI`: `list()`,
+  `selected()`, `get(ref)`, `pin(ref)`, `unpin(ref)`, `togglePinned(ref)`,
+  `close(ref)`, `duplicate(ref)`, `reload(ref)`, `select(ref)`,
+  `open(url)`. Accepts `TabRef = number | Tab` (palefox id OR Firefox
+  Tab element).
+- `src/platform/window.ts` — `PalefoxWindow` facade groups the
+  window-local APIs. Per-window stable `windowId` for cross-window
+  attribution.
+- `src/platform/index.ts` — `Palefox` namespace export. Exposed on
+  `window.Palefox` (ergonomic) and `window.pfxTest.Palefox` (tests).
 
-**Defers:** snapshot/session API as Palefox-owned format (M6).
+All mutations are sync; reconciler runs on next microtask;
+`Palefox.flush()` is the consistency-sensitive escape hatch.
+6/6 Tier 3 tests verify end-to-end (`platform-tabs.ts`).
 
-**Unlocks:** feature modules unit-testable in isolation (mock the
-semantic layer); breakage radius becomes "one adapter file" instead
-of "every callsite that hardcoded `gBrowser`."
+### M5.2 — Multi-instance scope foundation   🟢 (foundation done)
+
+Per the cross-instance search requirement: every persisted record
+will carry `instanceId`. Foundation in place via the strategy doc
+doctrine #7. Implementation lands with M6 (snapshot format).
+
+### M5.3 — Persisted APIs   ⚪
+
+`Palefox.history.searchTabs(q, { scope: "current" | "all" })`,
+`Palefox.sessions.list({ scope })`, `Palefox.checkpoints.*`. Defaults
+to `scope: "current"`. Per-profile + aggregate-on-read for `scope: "all"`
+(see M11).
+
+### M5.4 — Events bus   ⚪
+
+`Palefox.windows.current().events.on("tab:created" | "tab:selected" |
+"tab:closed" | "window:reconciled" | …)`. Replaces raw `TabOpen`
+listeners. Cross-window broadcast via `Palefox.events.onAny(...)`
+when a real consumer needs it.
+
+### M5.5 — Cross-window aggregator   ⚪
+
+`Palefox.tabs.findAcrossWindows(query)` — see M12.
+
+**Unlocks (M5.1 already):** new code can write
+`Palefox.windows.current().tabs.pin(id)` instead of touching
+`gBrowser`. Mockable via the platform API for Tier 1 tests in M8.
 
 ---
 
-## M6 — Palefox-owned snapshot format   ⚪
+## M6 — Palefox-owned snapshot format + multi-instance foundation   ⚪
 
 Promote the `history.ts` event log to a fully Palefox-owned snapshot
 contract. SessionStore becomes an interoperability source, not the
-sole source of truth.
+sole source of truth. **Bakes in the `instanceId` column from day one**
+so cross-instance queries (M11) are a filter, not a migration.
 
 Scope:
 
 - `src/platform/palefox/snapshots.ts` — `Palefox.sessions.{capture,
   restore, restoreWindow}`. Snapshots include palefox version,
-  Firefox version (from canary pin), tree shape, tab metadata, sidebar
-  state, group state.
+  Firefox version (from canary pin), `instanceId`, tree shape, tab
+  metadata, sidebar state, group state.
+- `instanceId` written to every row of every persisted table. Stable
+  per-profile (derived from the profile path or randomly assigned and
+  cached on first run).
 - Restore prefers palefox snapshot data, consults SessionStore as
   fallback for lazy-tab content recovery.
 - Tier 3 fixture suite for restore behavior — addresses the Class F
   failure mode that's hardest to test today.
 
 **Defers:** schema migration tooling for snapshot version bumps (only
-needed when we hit it).
+needed when we hit it). Cross-instance read (M11).
 
-**Unlocks:** Class F regressions caught by test, not by user.
+**Unlocks:** Class F regressions caught by test. The schema can serve
+multi-instance queries without a migration.
+
+## M11 — Cross-instance history + sessions   ⚪
+
+User-facing requirement: search history / sessions / checkpoints
+across all Firefox profiles palefox is installed in, with explicit
+scope toggle (`current` / `all`).
+
+Scope:
+
+- **Instance discovery** — read `~/.mozilla/firefox/profiles.ini`,
+  enumerate profile paths, check each for a `palefox-history.sqlite`
+  file. Cache the list; refresh when prefs change or on demand.
+- **Per-profile + aggregate on read** (NOT shared SQLite). Each
+  instance writes only to its own profile's DB; cross-instance reads
+  open the others read-only and merge results. Avoids the
+  shared-writer contention pitfall.
+- **API surface (in `src/platform/palefox/history.ts`):**
+  ```ts
+  Palefox.history.searchTabs(q, { scope: "current" | "all" })
+  Palefox.sessions.list({ scope: "current" | "all" })
+  Palefox.checkpoints.list({ scope: "current" | "all" })
+  Palefox.instances.list()  // discovered instances, with metadata
+  ```
+- **Default scope:** `"current"` — keeps the common case fast and
+  surprise-free; cross-instance is opt-in per call.
+
+**Defers:** live cross-instance queries (e.g. "what tabs are open in
+my work Firefox right now"). That requires inter-process IPC across
+running Firefoxes — out of scope. The closest live answer is "what
+was last seen open" via the most recent snapshot of that instance.
+
+**Unlocks:** "find that thing I had open in my other Firefox" actually works.
+
+## M12 — Cross-window live search (this instance)   ⚪
+
+Aggregate live tab queries across all chrome windows of the current
+Firefox instance. Distinct from M11 (which is across instances) and
+from `Palefox.windows.current().tabs.*` (which is one window).
+
+Scope:
+
+- `Palefox.tabs.findAcrossWindows(query)` — iterates each window's
+  `WindowTabs` API, returns merged results with `windowId` attached.
+- Useful for `:tabs` picker — when called with `{ scope: "all-windows" }`
+  the picker shows tabs from every window, with window context shown
+  as a `secondary` line.
+
+**Defers:** event subscription across windows (`Palefox.events.onAny`
+shape). Add when there's a real consumer.
 
 ---
 

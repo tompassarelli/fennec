@@ -55,6 +55,13 @@ src/firefox/     Firefox adapter layer — typed wrappers around chrome globals
   dom.ts           createXULElement factories typed by tag
   window.ts        well-known chrome IDs + system principal + ESM loader
 
+src/platform/    Palefox semantic platform layer (the capability API)
+  index.ts         exports `Palefox` namespace; one per chrome window
+  scheduler.ts     central scheduler with markDirty/flush/diag
+  tabs-reconciler.ts  bridges Firefox tab events into the scheduler
+  window.ts        PalefoxWindow facade (`Palefox.windows.current()`)
+  window-tabs.ts   `WindowTabsAPI` — list/selected/pin/close/etc.
+
 src/types/chrome.d.ts   ambient chrome globals + DOM augmentation
 src/hello/              smoke-test stub
 
@@ -143,11 +150,25 @@ dependency we have is enumerated in
 [docs/dev/firefox-stability-roadmap.md](docs/dev/firefox-stability-roadmap.md)
 (the milestone TODO file). Operating rules:
 
-- **New chrome-API calls go through `src/firefox/<adapter>.ts`** —
-  feature code imports typed primitives, never touches `gBrowser` /
-  `Services` / `gURLBar` directly. `src/firefox/tabs.ts` is the
-  reference example. Existing call sites are migrated opportunistically
-  when their containing module is touched; no big-bang rewrites.
+- **New feature code talks to `Palefox.windows.current().*` (semantic
+  layer in `src/platform/`), or `src/firefox/<adapter>.ts` if the
+  capability isn't in the semantic layer yet.** Raw `gBrowser` /
+  `Services` / `gURLBar` access outside the adapter layer is forbidden.
+  Existing call sites are migrated opportunistically when their
+  containing module is touched; no big-bang rewrites. **`vim.ts`
+  specifically: no NEW raw chrome-API access — new keymap/ex-mode
+  handlers must use the semantic layer.**
+- **Live state is window-scoped, persisted is global.** Use
+  `Palefox.windows.current().tabs.*` for live tab ops (NOT
+  `Palefox.tabs.*` — there is no such global by design).
+  `Palefox.history.*` / `.sessions.*` / `.checkpoints.*` are
+  scope-parameterized: pass `{ scope: "current" | "all" }`.
+- **Mutations are synchronous; reconcile is microtask-deferred.**
+  `Palefox.windows.current().tabs.pin(id)` returns immediately;
+  the scheduler reconciles on the next microtask. If you genuinely
+  need the model settled before continuing, `await Palefox.flush()`.
+  Persistence ops (`Palefox.history.*`, snapshots) stay async at
+  the call site.
 - **Run `bun run firefox:canary` before each release** and after any
   upstream pull. It diffs the Firefox source files we cite against the
   pinned revision (`tools/firefox-pin.json`) and tells you exactly

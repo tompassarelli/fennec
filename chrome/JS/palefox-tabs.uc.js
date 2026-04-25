@@ -4385,6 +4385,300 @@
     return { contentInputFocused, diag, destroy };
   }
 
+  // src/platform/scheduler.ts
+  var DOMAIN_ORDER = [
+    "prefs",
+    "windows",
+    "tabs",
+    "snapshots",
+    "sidebar",
+    "command"
+  ];
+  function makeScheduler() {
+    const log8 = createLogger("scheduler");
+    const reconcilers = new Map;
+    const pending = new Map;
+    let pendingFlush = null;
+    let pendingResolve = null;
+    let lastReconcileMs = null;
+    let destroyed = false;
+    function getDirty(domain) {
+      let arr = pending.get(domain);
+      if (!arr) {
+        arr = [];
+        pending.set(domain, arr);
+      }
+      return arr;
+    }
+    function runOnce() {
+      if (destroyed)
+        return;
+      const startedAt = performance.now();
+      const snapshot = new Map(pending);
+      pending.clear();
+      for (const domain of DOMAIN_ORDER) {
+        const reasons = snapshot.get(domain);
+        if (!reasons || reasons.length === 0)
+          continue;
+        const handlers = reconcilers.get(domain) ?? [];
+        for (const r of handlers) {
+          try {
+            r.run(reasons);
+          } catch (e) {
+            log8("reconciler:error", { domain, reasons, msg: String(e) });
+          }
+        }
+      }
+      lastReconcileMs = performance.now() - startedAt;
+      log8("reconcile:done", { ms: lastReconcileMs });
+    }
+    function schedule() {
+      if (pendingFlush || destroyed)
+        return;
+      pendingFlush = new Promise((resolve) => {
+        pendingResolve = resolve;
+        queueMicrotask(() => {
+          try {
+            runOnce();
+          } finally {
+            const hadCarryover = [...pending.values()].some((arr) => arr.length > 0);
+            pendingFlush = null;
+            const localResolve = pendingResolve;
+            pendingResolve = null;
+            if (hadCarryover)
+              schedule();
+            localResolve?.();
+          }
+        });
+      });
+    }
+    function register(reconciler) {
+      let list = reconcilers.get(reconciler.domain);
+      if (!list) {
+        list = [];
+        reconcilers.set(reconciler.domain, list);
+      }
+      list.push(reconciler);
+      log8("register", { domain: reconciler.domain });
+      return () => {
+        const arr = reconcilers.get(reconciler.domain);
+        if (!arr)
+          return;
+        const i = arr.indexOf(reconciler);
+        if (i >= 0)
+          arr.splice(i, 1);
+      };
+    }
+    function markDirty(domain, reason) {
+      if (destroyed)
+        return;
+      getDirty(domain).push(reason);
+      schedule();
+    }
+    async function flush2() {
+      while (pendingFlush) {
+        await pendingFlush;
+      }
+    }
+    function diag() {
+      const out = {};
+      for (const d of DOMAIN_ORDER) {
+        out[d] = pending.get(d) ?? [];
+      }
+      return {
+        pending: out,
+        nextFlushPending: pendingFlush !== null,
+        lastReconcileMs
+      };
+    }
+    function destroy() {
+      destroyed = true;
+      pending.clear();
+      reconcilers.clear();
+    }
+    return { register, markDirty, flush: flush2, diag, destroy };
+  }
+
+  // src/platform/tabs-reconciler.ts
+  function makeTabsReconciler(deps) {
+    const log8 = createLogger("reconciler/tabs");
+    const { scheduler } = deps;
+    const unregister = scheduler.register({
+      domain: "tabs",
+      run(reasons) {
+        log8("reconcile", { reasons });
+      }
+    });
+    function onTabEvent(e) {
+      scheduler.markDirty("tabs", e.type);
+    }
+    for (const ev of ["TabOpen", "TabClose", "TabMove", "TabSelect", "TabAttrModified", "TabPinned", "TabUnpinned"]) {
+      gBrowser.tabContainer.addEventListener(ev, onTabEvent);
+    }
+    function destroy() {
+      for (const ev of ["TabOpen", "TabClose", "TabMove", "TabSelect", "TabAttrModified", "TabPinned", "TabUnpinned"]) {
+        gBrowser.tabContainer.removeEventListener(ev, onTabEvent);
+      }
+      unregister();
+    }
+    return { destroy };
+  }
+
+  // src/firefox/tabs.ts
+  function allTabs2() {
+    return gBrowser.tabs;
+  }
+  function selectedTab() {
+    return gBrowser.selectedTab;
+  }
+  function selectTab(tab) {
+    gBrowser.selectedTab = tab;
+  }
+  function pinTab(tab) {
+    if (!tab.pinned)
+      gBrowser.pinTab(tab);
+  }
+  function unpinTab(tab) {
+    if (tab.pinned)
+      gBrowser.unpinTab(tab);
+  }
+  function togglePinned(tab) {
+    if (tab.pinned)
+      unpinTab(tab);
+    else
+      pinTab(tab);
+  }
+  function removeTab(tab) {
+    gBrowser.removeTab(tab);
+  }
+  function duplicateTab(tab) {
+    return gBrowser.duplicateTab(tab);
+  }
+  function reloadTab(tab) {
+    gBrowser.reloadTab(tab);
+  }
+  function openTab(url) {
+    return gBrowser.addTab(url, {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
+    });
+  }
+
+  // src/platform/window-tabs.ts
+  function makeWindowTabs(scheduler) {
+    const log8 = createLogger("platform/tabs");
+    function resolveTab(ref) {
+      if (typeof ref === "number")
+        return tabById(ref);
+      return ref;
+    }
+    function project(tab) {
+      const td = treeOf.get(tab);
+      if (!td)
+        return null;
+      return {
+        id: td.id,
+        url: tab.linkedBrowser?.currentURI?.spec ?? "",
+        label: tab.label ?? "",
+        customName: td.name,
+        pinned: !!tab.pinned,
+        selected: !!tab.selected,
+        hidden: !!tab.hidden,
+        parentId: td.parentId,
+        depth: depthOf(td)
+      };
+    }
+    function depthOf(td) {
+      let d = 0;
+      let cur = td;
+      while (cur && cur.parentId !== null) {
+        d += 1;
+        const parent = typeof cur.parentId === "number" ? tabById(cur.parentId) : null;
+        if (!parent)
+          break;
+        cur = treeOf.get(parent);
+      }
+      return d;
+    }
+    function list() {
+      const out = [];
+      for (const tab of allTabs2()) {
+        const p = project(tab);
+        if (p)
+          out.push(p);
+      }
+      return out;
+    }
+    function selected() {
+      return project(selectedTab());
+    }
+    function get(ref) {
+      const t = resolveTab(ref);
+      return t ? project(t) : null;
+    }
+    function withTab(ref, op, reason) {
+      const t = resolveTab(ref);
+      if (!t) {
+        log8("ref:not-found", { ref: typeof ref === "number" ? ref : "(Tab elem)" });
+        return;
+      }
+      op(t);
+      scheduler.markDirty("tabs", reason);
+    }
+    return {
+      list,
+      selected,
+      get,
+      pin: (r) => withTab(r, pinTab, "Palefox.tabs.pin"),
+      unpin: (r) => withTab(r, unpinTab, "Palefox.tabs.unpin"),
+      togglePinned: (r) => withTab(r, togglePinned, "Palefox.tabs.togglePinned"),
+      close: (r) => withTab(r, removeTab, "Palefox.tabs.close"),
+      duplicate(r) {
+        const t = resolveTab(r);
+        if (!t)
+          return null;
+        const dup = duplicateTab(t);
+        scheduler.markDirty("tabs", "Palefox.tabs.duplicate");
+        return project(dup);
+      },
+      reload: (r) => withTab(r, reloadTab, "Palefox.tabs.reload"),
+      select: (r) => withTab(r, (t) => {
+        state;
+        selectTab(t);
+      }, "Palefox.tabs.select"),
+      open(url) {
+        const t = openTab(url);
+        scheduler.markDirty("tabs", "Palefox.tabs.open");
+        return project(t);
+      }
+    };
+  }
+
+  // src/platform/window.ts
+  var nextWindowId = 1;
+  function makePalefoxWindow(scheduler) {
+    const windowId = `w${nextWindowId++}`;
+    return {
+      windowId,
+      tabs: makeWindowTabs(scheduler)
+    };
+  }
+
+  // src/platform/index.ts
+  function makePalefox() {
+    const scheduler = makeScheduler();
+    const tabsReconciler = makeTabsReconciler({ scheduler });
+    const win = makePalefoxWindow(scheduler);
+    return {
+      windows: { current: () => win },
+      flush: () => scheduler.flush(),
+      diag: () => ({ scheduler: scheduler.diag(), windowId: win.windowId }),
+      destroy() {
+        tabsReconciler.destroy();
+        scheduler.destroy();
+      }
+    };
+  }
+
   // src/tabs/index.ts
   var pfxLog = createLogger("tabs");
   var sidebarMain = document.getElementById("sidebar-main");
@@ -4432,6 +4726,8 @@
   }
   var history = makeHistory();
   var contentFocus = makeContentFocus();
+  var Palefox = makePalefox();
+  window.Palefox = Palefox;
   var scheduleSave = makeSaver(() => ({
     tabs: [...gBrowser.tabs],
     rows: () => allRows(),
@@ -4679,6 +4975,7 @@
       clearInterval(retentionTimer);
       history.close().catch(() => {});
       contentFocus.destroy();
+      Palefox.destroy();
     }, { once: true });
     if (Services.prefs.getBoolPref("pfx.test.exposeAPI", false)) {
       window.pfxTest = {
@@ -4719,7 +5016,8 @@
         },
         contentFocusDiag() {
           return contentFocus.diag();
-        }
+        },
+        Palefox
       };
       console.log("palefox-tabs: pfxTest debug API exposed");
     }

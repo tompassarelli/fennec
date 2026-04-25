@@ -12,9 +12,19 @@ palefox depends on is **explicit, source-linked, version-pinned, and
 re-verified against upstream change**. When upstream moves, our job is to
 detect *which specific* files we cite have changed — not to re-audit Firefox.
 
+## The architectural sentence
+
+> Palefox live state is **window-scoped** because Firefox live state is
+> window-scoped. Palefox persisted state is **global** because Palefox
+> sessions, checkpoints, and history are user-level concepts. Firefox
+> events **invalidate** Palefox state; Palefox **reconcilers** rebuild
+> semantic state from stable primitives under a **central scheduler**.
+
+This is the foundation. The doctrine and roadmap below derive from it.
+
 ## Doctrine
 
-Five rules that decide every architecture question downstream:
+Six rules that decide every architecture question downstream:
 
 1. **Palefox does not program directly against Firefox internals except in
    the Firefox adapter layer (`src/firefox/*`).** Feature code imports
@@ -35,6 +45,20 @@ Five rules that decide every architecture question downstream:
 5. **All high-risk Firefox dependencies are source-linked, typed, tested,
    and tracked by the upstream canary.** Untracked dependencies leak —
    the manifest is the gate, not a wishlist.
+6. **Live APIs are window-scoped; persisted APIs are scope-parameterized.**
+   Live state — tabs, selection, urlbar, sidebar — lives on a specific
+   chrome window and is reached as `Palefox.windows.current().tabs.*`.
+   Persisted state — sessions, checkpoints, history — is reached at
+   the top with an explicit scope: `Palefox.history.searchTabs(q, { scope: "current" | "all" })`
+   defaulting to `"current"`. The API shape forces callers to confront
+   scope; ambiguous globals like `Palefox.tabs.list()` are forbidden.
+7. **Every persisted record carries an `instanceId`.** Multi-instance
+   palefox (multiple Firefox profiles on a machine) is a real use case.
+   Every history event, snapshot, checkpoint stores the instance it
+   came from so cross-instance queries are a filter, not a migration.
+   Per-profile SQLite remains the writer; aggregation happens at
+   read time across discovered profiles (see `firefox-stability-roadmap.md`
+   M6+).
 
 Palefox is chrome-privileged code living next to Firefox's private
 implementation. We are not a WebExtension; we are not behind a stable API
@@ -210,23 +234,38 @@ Two rules govern the semantic layer:
    the reconciler reads `gBrowser.tabs` and rebuilds. See *Reconciler*
    below.
 
-### The reconciler
+### The scheduler + reconcilers
+
+Palefox uses **one scheduler, many domain reconcilers**. Not one giant
+reconciler over everything (premature lock-in), and not ad-hoc per-domain
+schedulers (spooky ordering bugs).
 
 ```
 Firefox emits noisy primitive event.
   ↓
 Adapter normalizes + bubbles a Palefox event.
   ↓
-Palefox model marks itself dirty (with a reason tag).
+Scheduler.markDirty(domain, reason)
   ↓
-Reconciler is scheduled (microtask or rAF).
+[microtask coalesces multiple markDirty calls]
   ↓
-Reconciler reads current Firefox primitive state.
+Scheduler runs reconcilers in declared order:
+   1. prefs
+   2. windows
+   3. tabs
+   4. sessions/snapshots
+   5. sidebar DOM
+   6. command/picker derived state
   ↓
-Reconciler diffs against Palefox model + applies the diff.
+Each reconciler reads current Firefox primitive state and rebuilds
+its slice of the Palefox model.
   ↓
 UI rebuilds from Palefox model.
 ```
+
+The scheduler owns: dirty flags, microtask timing, ordering, reason
+logging, dedup, `flush()`, diagnostics. Reconcilers own their domain
+logic.
 
 This is the architectural answer to Class C and Class D breakage. The
 v0.40.0 floating-urlbar regression where the horizontal observer raced
@@ -234,9 +273,31 @@ the deactivate would have been impossible: the popover state would just
 be re-derived from `breakout-extend + pfx-urlbar-floating` on every
 reconcile pass, no race window.
 
+#### Sync writes, write-through model, explicit flush
+
+Live mutations are **synchronous by default**. `Palefox.windows.current().tabs.pin(id)`
+returns immediately after the `gBrowser.pinTab` call lands.
+
+Reconciler updates the Palefox model on the next microtask. For
+deterministic operations (pin/unpin/move/close), the implementation
+also **write-through-updates** the model synchronously so the
+intra-tick model isn't visibly torn.
+
+When a caller genuinely needs the model to be settled before
+continuing (rare), it awaits an explicit consistency boundary:
+
+```ts
+Palefox.windows.current().tabs.pin(id);
+await Palefox.flush();
+// model is now reconciled with reality
+```
+
+Persistence operations (snapshots, history queries, file IO) are
+async by nature — those stay `async`/`await` at the call site.
+
 The `rows.scheduleTreeResync` pattern in `src/tabs/rows.ts` is already
-a partial reconciler for the tree. Generalizing it across the platform
-layer is M4 on the roadmap.
+a partial reconciler for the tree. M4 generalizes it under the
+scheduler; M5 builds the semantic API on top.
 
 ### Tier 0–3 primitive classification (forward design rule)
 
