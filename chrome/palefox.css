@@ -50,14 +50,92 @@
   --pfx-accent:       light-dark(#0061e0, #00ddff);
 }
 
-/* Opt-in: use Firefox's theme-resolved variables when they're available.
- * Each falls back to our literal palette so an empty/transparent system
- * token can't paint nothing. */
+/* Opt-in: route the palefox palette through Firefox's theme variables
+ * (stylix, installed theme, system colors). Each falls back to our
+ * literal palette so transparent / unset tokens can't paint nothing. */
 @media -moz-pref("pfx.theme.useSystem") {
   :root {
-    --pfx-bg:          var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22));
-    --pfx-bg-popout:   var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22));
-    --pfx-fg:          var(--sidebar-text-color, light-dark(#15141a, #fbfbfe));
+    --pfx-bg:           var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22));
+    --pfx-bg-popout:    var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22));
+    --pfx-bg-elevated:  var(--toolbar-field-background-color, light-dark(#ffffff, #2b2a33));
+    --pfx-fg:           var(--sidebar-text-color, light-dark(#15141a, #fbfbfe));
+  }
+}
+
+/* SHIELD: when palefox owns the theme (default), stamp our palette over
+ * every Firefox / LWT theme variable that the chrome reads — so a system
+ * theme (stylix, GNOME, Zen, etc.) or installed Firefox theme cannot
+ * leak into the chrome. The full inventory of overridden variables was
+ * audited from Zen / gwfox / FF-ULTIMA + Firefox source.
+ *
+ * The shield is gated on `not -moz-pref("pfx.theme.useSystem")` so users
+ * who want Firefox's theme cascade can opt in (see below).
+ *
+ * Variables intentionally LEFT UNTOUCHED: tab grouping internals
+ * (#tabbrowser-tabs is hidden by palefox anyway), accentcolor /
+ * accent-color-inactive (titlebar; controlled by OS chrome).
+ */
+@media not -moz-pref("pfx.theme.useSystem") {
+  :root {
+    /* Toolbar surfaces */
+    --toolbar-bgcolor:                          var(--pfx-bg) !important;
+    --toolbar-color:                            var(--pfx-fg) !important;
+    --toolbar-color-scheme:                     light dark !important;
+    --lwt-accent-color:                         var(--pfx-bg) !important;
+    --lwt-accent-color-inactive:                var(--pfx-bg) !important;
+    --lwt-text-color:                           var(--pfx-fg) !important;
+
+    /* Toolbar buttons */
+    --toolbarbutton-icon-fill:                  var(--pfx-fg) !important;
+    --toolbarbutton-icon-fill-attention:        var(--pfx-accent) !important;
+    --toolbarbutton-hover-background:           var(--pfx-bg-elevated) !important;
+    --toolbarbutton-active-background:          color-mix(in srgb, var(--pfx-fg) 15%, transparent) !important;
+    --lwt-toolbarbutton-icon-fill:              var(--pfx-fg) !important;
+    --lwt-toolbarbutton-hover-background:       var(--pfx-bg-elevated) !important;
+    --lwt-toolbarbutton-active-background:      color-mix(in srgb, var(--pfx-fg) 15%, transparent) !important;
+
+    /* Urlbar / search field */
+    --toolbar-field-background-color:           var(--pfx-bg-elevated) !important;
+    --toolbar-field-color:                      var(--pfx-fg) !important;
+    --toolbar-field-border-color:               var(--pfx-border) !important;
+    --toolbar-field-focus-background-color:     var(--pfx-bg-elevated) !important;
+    --toolbar-field-focus-color:                var(--pfx-fg) !important;
+    --toolbar-field-focus-border-color:         var(--pfx-accent) !important;
+    --lwt-toolbar-field-background-color:       var(--pfx-bg-elevated) !important;
+    --lwt-toolbar-field-color:                  var(--pfx-fg) !important;
+    --lwt-toolbar-field-border-color:           var(--pfx-border) !important;
+    --lwt-toolbar-field-focus:                  var(--pfx-bg-elevated) !important;
+    --lwt-toolbar-field-focus-color:            var(--pfx-fg) !important;
+    --urlbar-box-bgcolor:                       var(--pfx-bg-elevated) !important;
+    --urlbar-box-hover-bgcolor:                 color-mix(in srgb, var(--pfx-fg) 8%, transparent) !important;
+
+    /* Urlbar dropdown view */
+    --urlbarView-background-color-selected:     var(--pfx-bg-elevated) !important;
+    --urlbarView-text-color-selected:           var(--pfx-fg) !important;
+
+    /* Sidebar */
+    --sidebar-background-color:                 var(--pfx-bg) !important;
+    --sidebar-text-color:                       var(--pfx-fg) !important;
+    --sidebar-border-color:                     var(--pfx-border) !important;
+    --tabpanel-background-color:                var(--pfx-bg) !important;
+
+    /* Tabs (palefox hides the native strip but Firefox still reads these
+     * for the tab-switcher previews etc.) */
+    --tab-selected-bgcolor:                     var(--pfx-bg-elevated) !important;
+    --tab-selected-textcolor:                   var(--pfx-fg) !important;
+    --tab-loading-fill:                         var(--pfx-accent) !important;
+    --lwt-tab-line-color:                       transparent !important;
+    --lwt-background-tab-separator-color:       transparent !important;
+
+    /* Separators / chrome-content seams */
+    --toolbarseparator-color:                   var(--pfx-border) !important;
+    --tabs-navbar-separator-color:              transparent !important;
+    --chrome-content-separator-color:           transparent !important;
+
+    /* Popups / autocomplete */
+    --arrowpanel-background:                    var(--pfx-bg-elevated) !important;
+    --arrowpanel-color:                         var(--pfx-fg) !important;
+    --arrowpanel-border-color:                  var(--pfx-border) !important;
   }
 }
 

@@ -337,8 +337,8 @@
   border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
   border-radius: 2px;
   font: inherit;
-  background: var(--toolbar-field-background-color, Field);
-  color: var(--toolbar-field-color, FieldText);
+  background: var(--pfx-bg-elevated);
+  color: var(--pfx-fg);
 }
 
 /* #endregion rename input */

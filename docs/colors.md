@@ -82,20 +82,57 @@ hex, etc.). To set scheme-aware values yourself:
 
 ---
 
+## What gets shielded
+
+Palefox stamps its palette over **every Firefox theme variable** the
+chrome surfaces read — so a system theme manager (stylix, GNOME,
+installed Firefox theme), an LWT, or `-moz-sidebar` system tokens
+cannot leak through. The shield covers:
+
+- Toolbar — `--toolbar-bgcolor`, `--toolbar-color`, `--toolbar-color-scheme`
+- LWT base — `--lwt-accent-color`, `--lwt-accent-color-inactive`, `--lwt-text-color`
+- Toolbar buttons — `--toolbarbutton-icon-fill`, `--toolbarbutton-icon-fill-attention`,
+  `--toolbarbutton-hover-background`, `--toolbarbutton-active-background`,
+  and the `--lwt-toolbarbutton-*` aliases
+- Urlbar / search field — `--toolbar-field-background-color`,
+  `--toolbar-field-color`, `--toolbar-field-border-color`, the
+  `--toolbar-field-focus-*` family, the `--lwt-toolbar-field-*`
+  aliases, plus `--urlbar-box-bgcolor` / `--urlbar-box-hover-bgcolor`
+- Urlbar dropdown — `--urlbarView-background-color-selected`,
+  `--urlbarView-text-color-selected`
+- Sidebar — `--sidebar-background-color`, `--sidebar-text-color`,
+  `--sidebar-border-color`, `--tabpanel-background-color`
+- Tabs — `--tab-selected-bgcolor`, `--tab-selected-textcolor`,
+  `--tab-loading-fill`, `--lwt-tab-line-color`, `--lwt-background-tab-separator-color`
+- Separators — `--toolbarseparator-color`, `--tabs-navbar-separator-color`,
+  `--chrome-content-separator-color`
+- Popups — `--arrowpanel-background`, `--arrowpanel-color`, `--arrowpanel-border-color`
+
+Each one resolves to one of the `--pfx-*` tokens above. Override the
+`--pfx-*` to recolor the lot in one shot.
+
+---
+
 ## Opting back into Firefox's theme variables
 
-If you have a working Firefox theme that paints the sidebar correctly
-and you'd rather inherit from it:
+If you have a working Firefox theme (stylix, an installed Lightweight
+Theme, GNOME-theme, etc.) and you want palefox to inherit from it:
 
 ```
 about:config  →  pfx.theme.useSystem  →  true
 ```
 
-This routes `--pfx-bg` / `--pfx-bg-popout` / `--pfx-fg` through
-Firefox's `--sidebar-background-color` / `--sidebar-text-color`,
-falling back to our literal palette only when those return nothing.
-Useful if your theme handles the sidebar correctly — risky if it
-doesn't.
+This:
+
+1. Lifts the shield (the `--toolbar-*` / `--lwt-*` / `--sidebar-*`
+   overrides go away, Firefox's normal cascade applies).
+2. Routes `--pfx-bg`, `--pfx-bg-popout`, `--pfx-bg-elevated`, `--pfx-fg`
+   through `--sidebar-background-color` /
+   `--toolbar-field-background-color` / `--sidebar-text-color`,
+   falling back to the literal palette only when those return nothing.
+
+Risky if your theme has the Linux GTK transparency bug — but useful
+otherwise.
 
 ---
 
