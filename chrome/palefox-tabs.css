@@ -397,6 +397,18 @@
   isolation: isolate !important;
   margin-top: 6px;
 }
+
+/* Opt-in: place the tab strip BELOW nav-bar in horizontal mode (default
+ * Firefox order has tabs on top). Set pfx.toolbar.tabsBelowNavBar = true
+ * in about:config to flip. */
+@media -moz-pref("pfx.toolbar.tabsBelowNavBar") {
+  :root[pfx-horizontal-tabs] #navigator-toolbox {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  :root[pfx-horizontal-tabs] #TabsToolbar { order: 1; }
+  :root[pfx-horizontal-tabs] #PersonalToolbar { order: 2; }
+}
 /* Don't let navigator-toolbox clip TabsToolbar's popouts. */
 :root[pfx-horizontal-tabs] #navigator-toolbox {
   overflow: visible !important;
