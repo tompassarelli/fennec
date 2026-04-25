@@ -32,6 +32,14 @@ export const state: {
   contextTab: Tab | null;
   cursor: Row | null;
   nextTabId: number;
+  /** True from startup until sessionstore-windows-restored fires. Gates the
+   *  FIFO fallback in popSavedForTab so user-opened tabs don't consume stale
+   *  entries from a previous session. */
+  inSessionRestore: boolean;
+  /** Snapshot of the tab nodes loaded from disk this session. Consumed by
+   *  the sessionstore-initiating-manual-restore observer (Ctrl+Shift+T at
+   *  window level) to repopulate savedTabQueue. */
+  lastLoadedNodes: SavedNode[];
 } = {
   panel: null as unknown as HTMLElement,
   spacer: null as unknown as HTMLElement,
@@ -39,6 +47,8 @@ export const state: {
   contextTab: null,
   cursor: null,
   nextTabId: 1,
+  inSessionRestore: true,
+  lastLoadedNodes: [],
 };
 
 // --- Tab metadata, keyed by native Firefox tab ---

@@ -50,13 +50,6 @@
     };
   }
 
-  // src/tabs/constants.ts
-  var INDENT = 14;
-  var SAVE_FILE = "palefox-tab-tree.json";
-  var CHORD_TIMEOUT = 500;
-  var CLOSED_MEMORY = 32;
-  var PIN_ATTR = "pfx-id";
-
   // src/tabs/state.ts
   var state = {
     panel: null,
@@ -64,7 +57,9 @@
     pinnedContainer: null,
     contextTab: null,
     cursor: null,
-    nextTabId: 1
+    nextTabId: 1,
+    inSessionRestore: true,
+    lastLoadedNodes: []
   };
   var treeOf = new WeakMap;
   var rowOf = new WeakMap;
@@ -73,6 +68,13 @@
   var closedTabs = [];
   var selection = new Set;
   var movingTabs = new Set;
+
+  // src/tabs/constants.ts
+  var INDENT = 14;
+  var SAVE_FILE = "palefox-tab-tree.json";
+  var CHORD_TIMEOUT = 500;
+  var CLOSED_MEMORY = 32;
+  var PIN_ATTR = "pfx-id";
 
   // src/tabs/persist.ts
   function profilePath() {
@@ -2159,13 +2161,459 @@
     };
   }
 
+  // src/tabs/events.ts
+  var log2 = createLogger("tabs");
+  function makeEvents(deps) {
+    const { rows, vim, scheduleSave } = deps;
+    function popSavedByUrl2(url) {
+      return popSavedByUrl(savedTabQueue, url);
+    }
+    function popSavedForTab2(tab) {
+      return popSavedForTab(savedTabQueue, {
+        currentIdx: [...gBrowser.tabs].indexOf(tab),
+        pinnedId: readPinnedId(tab),
+        url: tabUrl(tab),
+        inSessionRestore: state.inSessionRestore,
+        log: log2
+      });
+    }
+    function popClosedEntry(url) {
+      if (!url)
+        return null;
+      for (let i = closedTabs.length - 1;i >= 0; i--) {
+        const entry = closedTabs[i];
+        if (entry.url === url)
+          return closedTabs.splice(i, 1)[0];
+      }
+      return null;
+    }
+    function applySavedToTab(tab, prior) {
+      const td = treeData(tab);
+      if (td.appliedSavedState)
+        return;
+      td.appliedSavedState = true;
+      td.id = prior.id || td.id;
+      td.parentId = prior.parentId ?? null;
+      td.name = prior.name || null;
+      td.state = prior.state || null;
+      td.collapsed = !!prior.collapsed;
+      pinTabId(tab, td.id);
+      log2("applySavedToTab", {
+        id: td.id,
+        parentId: td.parentId,
+        priorId: prior.id,
+        priorParentId: prior.parentId
+      });
+      rows.scheduleTreeResync();
+    }
+    function rememberClosedTab(tab, td) {
+      const url = tabUrl(tab);
+      if (!url || url === "about:blank")
+        return;
+      const row = rowOf.get(tab);
+      if (!row)
+        return;
+      const parent = parentOfTab(tab);
+      const myLevel = levelOf(tab);
+      let prevSiblingId = null;
+      let r = row.previousElementSibling;
+      while (r) {
+        if (r._tab) {
+          const lvl = levelOf(r._tab);
+          if (lvl < myLevel)
+            break;
+          if (lvl === myLevel) {
+            prevSiblingId = treeData(r._tab).id;
+            break;
+          }
+        }
+        r = r.previousElementSibling;
+      }
+      const descendantIds = [];
+      let n = row.nextElementSibling;
+      while (n && n !== state.spacer) {
+        if (n._tab) {
+          const lvl = levelOf(n._tab);
+          if (lvl <= myLevel)
+            break;
+          descendantIds.push(treeData(n._tab).id);
+        }
+        n = n.nextElementSibling;
+      }
+      closedTabs.push({
+        url,
+        id: td?.id || 0,
+        parentId: parent ? treeData(parent).id : null,
+        prevSiblingId,
+        descendantIds,
+        name: td?.name || null,
+        state: td?.state || null,
+        collapsed: !!td?.collapsed
+      });
+      if (closedTabs.length > CLOSED_MEMORY)
+        closedTabs.shift();
+    }
+    function isFxPinned(tab) {
+      if (tab.pinned)
+        return true;
+      const ptc = gBrowser.tabContainer?.pinnedTabsContainer || gBrowser.pinnedTabsContainer;
+      return !!ptc && tab.parentNode === ptc;
+    }
+    function placeRowInFirefoxOrder(tab, row) {
+      if (!row || !state.panel)
+        return false;
+      const tabsArr = [...gBrowser.tabs];
+      const myIdx = tabsArr.indexOf(tab);
+      if (myIdx < 0)
+        return false;
+      if (isFxPinned(tab)) {
+        let prevTab2 = null;
+        for (let i = myIdx - 1;i >= 0; i--) {
+          if (isFxPinned(tabsArr[i])) {
+            prevTab2 = tabsArr[i];
+            break;
+          }
+        }
+        if (prevTab2) {
+          const prevRow = rowOf.get(prevTab2);
+          if (!prevRow || prevRow === row)
+            return false;
+          if (prevRow.nextElementSibling !== row) {
+            prevRow.after(row);
+            return true;
+          }
+        } else if (state.pinnedContainer.firstChild !== row) {
+          state.pinnedContainer.insertBefore(row, state.pinnedContainer.firstChild);
+          return true;
+        }
+        return false;
+      }
+      let prevTab = null;
+      for (let i = myIdx - 1;i >= 0; i--) {
+        if (!isFxPinned(tabsArr[i])) {
+          prevTab = tabsArr[i];
+          break;
+        }
+      }
+      if (prevTab) {
+        const prevRow = rowOf.get(prevTab);
+        if (!prevRow || prevRow === row)
+          return false;
+        const prevSubtree = subtreeRows(prevRow);
+        const anchor = prevSubtree[prevSubtree.length - 1];
+        if (anchor.nextElementSibling !== row) {
+          anchor.after(row);
+          return true;
+        }
+      } else if (state.panel.firstChild !== row) {
+        state.panel.insertBefore(row, state.panel.firstChild);
+        return true;
+      }
+      return false;
+    }
+    function placeRestoredRow(row, parent, prevSiblingId) {
+      const parentRow = parent ? rowOf.get(parent) : null;
+      if (prevSiblingId) {
+        const sib = tabById(prevSiblingId);
+        const sibRow = sib ? rowOf.get(sib) : null;
+        const sibParent = sib ? parentOfTab(sib) : null;
+        const sameParent = !parent && !sibParent || !!parent && !!sibParent && treeData(parent).id === treeData(sibParent).id;
+        if (sibRow && sameParent) {
+          const st = subtreeRows(sibRow);
+          st[st.length - 1].after(row);
+          return;
+        }
+      } else {
+        if (parentRow) {
+          parentRow.after(row);
+          return;
+        }
+        state.panel.insertBefore(row, state.panel.firstChild);
+        return;
+      }
+      if (parentRow) {
+        const st = subtreeRows(parentRow);
+        st[st.length - 1].after(row);
+      } else {
+        state.panel.insertBefore(row, state.spacer);
+      }
+    }
+    function onTabOpen(e) {
+      const tab = e.target;
+      const td = treeData(tab);
+      const prior = popSavedForTab2(tab);
+      if (prior) {
+        const idx = [...gBrowser.tabs].indexOf(tab);
+        console.log(`palefox-tabs: onTabOpen matched — tab[${idx}] url="${tabUrl(tab)}" → saved id=${prior.id} parentId=${prior.parentId} origIdx=${prior._origIdx}`);
+        applySavedToTab(tab, prior);
+        const row2 = rows.createTabRow(tab);
+        if (tab.pinned) {
+          state.pinnedContainer.appendChild(row2);
+          state.pinnedContainer.hidden = false;
+        } else {
+          state.panel.insertBefore(row2, state.spacer);
+        }
+        if (vim.consumePendingCursorMove())
+          vim.setCursor(row2);
+        rows.updateVisibility();
+        scheduleSave();
+        return;
+      }
+      const position = Services.prefs.getCharPref("pfx.tabs.newTabPosition", "root");
+      const anchor = tab.owner || (gBrowser.selectedTab !== tab ? gBrowser.selectedTab : null);
+      if (position === "child" && anchor) {
+        td.parentId = treeData(anchor).id;
+      } else if (position === "sibling" && anchor) {
+        td.parentId = treeData(anchor).parentId;
+      }
+      const row = rows.createTabRow(tab);
+      if (tab.pinned) {
+        state.pinnedContainer.appendChild(row);
+        state.pinnedContainer.hidden = false;
+      } else {
+        state.panel.insertBefore(row, state.spacer);
+        placeRowInFirefoxOrder(tab, row);
+      }
+      if (position === "root") {
+        const tabsArr = [...gBrowser.tabs];
+        const lastIdx = tabsArr.length - 1;
+        if (tabsArr.indexOf(tab) !== lastIdx) {
+          try {
+            gBrowser.moveTabTo(tab, { tabIndex: lastIdx });
+          } catch {}
+        }
+      }
+      if (vim.consumePendingCursorMove())
+        vim.setCursor(row);
+      rows.scheduleTreeResync();
+      scheduleSave();
+    }
+    function onTabClose(e) {
+      const tab = e.target;
+      const row = rowOf.get(tab);
+      if (row) {
+        const td = treeData(tab);
+        rememberClosedTab(tab, td);
+        const closingId = td.id;
+        const newParentId = td.parentId ?? null;
+        const myLevel = levelOf(tab);
+        let next = row.nextElementSibling;
+        while (next && next !== state.spacer) {
+          if (next._tab) {
+            const ntd = treeData(next._tab);
+            if (levelOf(next._tab) <= myLevel)
+              break;
+            if (ntd.parentId === closingId) {
+              ntd.parentId = newParentId;
+              rows.syncTabRow(next._tab);
+            }
+          } else if (next._group) {
+            const gLv = next._group.level || 0;
+            if (gLv <= myLevel)
+              break;
+            next._group.level = Math.max(0, gLv - 1);
+            rows.syncGroupRow(next);
+          }
+          next = next.nextElementSibling;
+        }
+        if (state.cursor === row)
+          vim.moveCursor(1) || vim.moveCursor(-1);
+        row.remove();
+      }
+      rowOf.delete(tab);
+      rows.updateVisibility();
+      scheduleSave();
+    }
+    function onTabPinned(e) {
+      const tab = e.target;
+      const row = rowOf.get(tab);
+      if (!row)
+        return;
+      const td = treeData(tab);
+      const pinnedId = td.id;
+      td.parentId = null;
+      for (const t of gBrowser.tabs) {
+        if (treeData(t).parentId === pinnedId)
+          treeData(t).parentId = null;
+      }
+      row.removeAttribute("style");
+      if (row.parentNode !== state.pinnedContainer) {
+        state.pinnedContainer.appendChild(row);
+        placeRowInFirefoxOrder(tab, row);
+      }
+      state.pinnedContainer.hidden = false;
+      rows.syncTabRow(tab);
+      for (const r of allRows())
+        rows.syncAnyRow(r);
+      rows.updateVisibility();
+      scheduleSave();
+    }
+    function onTabUnpinned(e) {
+      const tab = e.target;
+      const row = rowOf.get(tab);
+      if (!row)
+        return;
+      row.draggable = true;
+      if (row.parentNode !== state.panel) {
+        state.panel.insertBefore(row, state.spacer);
+        placeRowInFirefoxOrder(tab, row);
+      }
+      rows.syncTabRow(tab);
+      if (!state.pinnedContainer.querySelector(".pfx-tab-row")) {
+        state.pinnedContainer.hidden = true;
+      }
+      rows.updateVisibility();
+      scheduleSave();
+    }
+    function onTabRestoring(e) {
+      const tab = e.target;
+      const url = tabUrl(tab);
+      const idx = [...gBrowser.tabs].indexOf(tab);
+      log2("onTabRestoring", {
+        idx,
+        url,
+        currentId: treeOf.get(tab)?.id,
+        currentParentId: treeOf.get(tab)?.parentId,
+        queueLen: savedTabQueue.length
+      });
+      const entry = popClosedEntry(url);
+      if (!entry) {
+        const td2 = treeData(tab);
+        if (td2.appliedSavedState)
+          return;
+        const correction = popSavedByUrl2(url);
+        if (correction) {
+          log2("onTabRestoring:correction", {
+            idx,
+            url,
+            savedId: correction.id,
+            savedParentId: correction.parentId,
+            parentResolvesTo: tabById(correction.parentId)?.label
+          });
+          td2.id = correction.id || td2.id;
+          td2.parentId = correction.parentId ?? null;
+          td2.name = correction.name || null;
+          td2.state = correction.state || null;
+          td2.collapsed = !!correction.collapsed;
+          td2.appliedSavedState = true;
+          pinTabId(tab, td2.id);
+          rows.scheduleTreeResync();
+          scheduleSave();
+        }
+        return;
+      }
+      const td = treeData(tab);
+      td.id = entry.id;
+      td.name = entry.name ?? null;
+      td.state = entry.state ?? null;
+      td.collapsed = entry.collapsed ?? false;
+      pinTabId(tab, td.id);
+      td.parentId = entry.parentId ?? null;
+      const parent = tabById(entry.parentId);
+      const row = rowOf.get(tab);
+      if (row) {
+        placeRestoredRow(row, parent, entry.prevSiblingId);
+        if (entry.descendantIds?.length) {
+          const expected = new Set(entry.descendantIds);
+          const oldParentId = entry.parentId ?? null;
+          let n = row.nextElementSibling;
+          while (n && n !== state.spacer) {
+            if (!n._tab)
+              break;
+            const ntd = treeData(n._tab);
+            if (!expected.has(ntd.id))
+              break;
+            if (ntd.parentId === oldParentId) {
+              ntd.parentId = td.id;
+            }
+            n = n.nextElementSibling;
+          }
+        }
+        rows.scheduleTreeResync();
+      }
+      rows.updateVisibility();
+      scheduleSave();
+    }
+    function onTabSelect() {
+      for (const tab of gBrowser.tabs) {
+        const row2 = rowOf.get(tab);
+        if (row2)
+          row2.toggleAttribute("selected", tab.selected);
+      }
+      const row = rowOf.get(gBrowser.selectedTab);
+      if (row && !state.cursor) {
+        row.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+      if (isHorizontal())
+        rows.updateHorizontalGrid();
+    }
+    function onTabAttrModified(e) {
+      rows.syncTabRow(e.target);
+    }
+    function onTabMove(e) {
+      const tab = e.target;
+      const row = rowOf.get(tab);
+      if (!row)
+        return;
+      const moved = placeRowInFirefoxOrder(tab, row);
+      if (moved && !movingTabs.has(tab)) {
+        rows.scheduleTreeResync();
+        scheduleSave();
+      }
+    }
+    function install() {
+      const tc = gBrowser.tabContainer;
+      tc.addEventListener("TabOpen", onTabOpen);
+      tc.addEventListener("TabClose", onTabClose);
+      tc.addEventListener("TabSelect", onTabSelect);
+      tc.addEventListener("TabAttrModified", onTabAttrModified);
+      tc.addEventListener("TabMove", onTabMove);
+      tc.addEventListener("SSTabRestoring", onTabRestoring);
+      tc.addEventListener("TabPinned", onTabPinned);
+      tc.addEventListener("TabUnpinned", onTabUnpinned);
+      const onSessionRestored = () => {
+        console.log("palefox-tabs: sessionstore-windows-restored — final tree resync");
+        log2("sessionstore-windows-restored", {
+          queueLen: savedTabQueue.length,
+          inSessionRestore: state.inSessionRestore
+        });
+        savedTabQueue.length = 0;
+        state.inSessionRestore = false;
+        rows.scheduleTreeResync();
+      };
+      Services.obs.addObserver(onSessionRestored, "sessionstore-windows-restored");
+      const onManualRestore = () => {
+        const aliveUrls = new Set([...gBrowser.tabs].map((t) => tabUrl(t)).filter((u) => u && u !== "about:blank"));
+        savedTabQueue.length = 0;
+        state.lastLoadedNodes.forEach((s, i) => {
+          if (s.url && aliveUrls.has(s.url))
+            return;
+          savedTabQueue.push({ ...s, _origIdx: i });
+        });
+        state.inSessionRestore = true;
+        log2("manualRestoreArmed", {
+          queueLen: savedTabQueue.length,
+          queueIds: savedTabQueue.map((s) => s.id)
+        });
+      };
+      Services.obs.addObserver(onManualRestore, "sessionstore-initiating-manual-restore");
+      return () => {
+        try {
+          Services.obs.removeObserver(onSessionRestored, "sessionstore-windows-restored");
+        } catch {}
+        try {
+          Services.obs.removeObserver(onManualRestore, "sessionstore-initiating-manual-restore");
+        } catch {}
+      };
+    }
+    return { install };
+  }
+
   // src/tabs/index.ts
   var pfxLog = createLogger("tabs");
   var sidebarMain = document.getElementById("sidebar-main");
   if (!sidebarMain)
     return;
-  var _lastLoadedNodes = [];
-  var _inSessionRestore = true;
   function clearSelection() {
     for (const r of selection)
       r.removeAttribute("pfx-multi");
@@ -2206,382 +2654,6 @@
     }
     Rows.updateVisibility();
   }
-  function popClosedEntry(url) {
-    if (!url)
-      return null;
-    for (let i = closedTabs.length - 1;i >= 0; i--) {
-      if (closedTabs[i].url === url)
-        return closedTabs.splice(i, 1)[0];
-    }
-    return null;
-  }
-  function applySavedToTab(tab, prior) {
-    const td = treeData(tab);
-    if (td.appliedSavedState)
-      return;
-    td.appliedSavedState = true;
-    td.id = prior.id || td.id;
-    td.parentId = prior.parentId ?? null;
-    td.name = prior.name || null;
-    td.state = prior.state || null;
-    td.collapsed = !!prior.collapsed;
-    pinTabId(tab, td.id);
-    pfxLog("applySavedToTab", { id: td.id, parentId: td.parentId, priorId: prior.id, priorParentId: prior.parentId });
-    Rows.scheduleTreeResync();
-  }
-  function onTabOpen(e) {
-    const tab = e.target;
-    const td = treeData(tab);
-    const prior = popSavedForTab2(tab);
-    if (prior) {
-      const idx = [...gBrowser.tabs].indexOf(tab);
-      console.log(`palefox-tabs: onTabOpen matched — tab[${idx}] url="${tabUrl(tab)}" → saved id=${prior.id} parentId=${prior.parentId} origIdx=${prior._origIdx}`);
-      applySavedToTab(tab, prior);
-      const row2 = Rows.createTabRow(tab);
-      if (tab.pinned && state.pinnedContainer) {
-        state.pinnedContainer.appendChild(row2);
-        state.pinnedContainer.hidden = false;
-      } else {
-        state.panel.insertBefore(row2, state.spacer);
-      }
-      if (vim.consumePendingCursorMove())
-        vim.setCursor(row2);
-      Rows.updateVisibility();
-      scheduleSave();
-      return;
-    }
-    const position = Services.prefs.getCharPref("pfx.tabs.newTabPosition", "root");
-    const anchor = tab.owner || (gBrowser.selectedTab !== tab ? gBrowser.selectedTab : null);
-    if (position === "child" && anchor) {
-      td.parentId = treeData(anchor).id;
-    } else if (position === "sibling" && anchor) {
-      td.parentId = treeData(anchor).parentId;
-    }
-    const row = Rows.createTabRow(tab);
-    if (tab.pinned && state.pinnedContainer) {
-      state.pinnedContainer.appendChild(row);
-      state.pinnedContainer.hidden = false;
-    } else {
-      state.panel.insertBefore(row, state.spacer);
-      placeRowInFirefoxOrder(tab, row);
-    }
-    if (position === "root") {
-      const tabsArr = [...gBrowser.tabs];
-      const lastIdx = tabsArr.length - 1;
-      if (tabsArr.indexOf(tab) !== lastIdx) {
-        try {
-          gBrowser.moveTabTo(tab, { tabIndex: lastIdx });
-        } catch {}
-      }
-    }
-    if (vim.consumePendingCursorMove())
-      vim.setCursor(row);
-    Rows.scheduleTreeResync();
-    scheduleSave();
-  }
-  function onTabClose(e) {
-    const tab = e.target;
-    const row = rowOf.get(tab);
-    if (row) {
-      const td = treeData(tab);
-      rememberClosedTab(tab, td);
-      const closingId = td.id;
-      const newParentId = td.parentId ?? null;
-      const myLevel = levelOf(tab);
-      let next = row.nextElementSibling;
-      while (next && next !== state.spacer) {
-        if (next._tab) {
-          const ntd = treeData(next._tab);
-          if (levelOf(next._tab) <= myLevel)
-            break;
-          if (ntd.parentId === closingId) {
-            ntd.parentId = newParentId;
-            Rows.syncTabRow(next._tab);
-          }
-        } else if (next._group) {
-          const gLv = next._group.level || 0;
-          if (gLv <= myLevel)
-            break;
-          next._group.level = Math.max(0, gLv - 1);
-          Rows.syncGroupRow(next);
-        }
-        next = next.nextElementSibling;
-      }
-      if (state.cursor === row)
-        vim.moveCursor(1) || vim.moveCursor(-1);
-      row.remove();
-    }
-    rowOf.delete(tab);
-    Rows.updateVisibility();
-    scheduleSave();
-  }
-  function onTabPinned(e) {
-    const tab = e.target;
-    const row = rowOf.get(tab);
-    if (!row || !state.pinnedContainer)
-      return;
-    const td = treeData(tab);
-    const pinnedId = td.id;
-    td.parentId = null;
-    for (const t of gBrowser.tabs) {
-      if (treeData(t).parentId === pinnedId)
-        treeData(t).parentId = null;
-    }
-    row.removeAttribute("style");
-    if (row.parentNode !== state.pinnedContainer) {
-      state.pinnedContainer.appendChild(row);
-      placeRowInFirefoxOrder(tab, row);
-    }
-    state.pinnedContainer.hidden = false;
-    Rows.syncTabRow(tab);
-    for (const r of allRows())
-      Rows.syncAnyRow(r);
-    Rows.updateVisibility();
-    scheduleSave();
-  }
-  function onTabUnpinned(e) {
-    const tab = e.target;
-    const row = rowOf.get(tab);
-    if (!row)
-      return;
-    row.draggable = true;
-    if (row.parentNode !== state.panel) {
-      state.panel.insertBefore(row, state.spacer);
-      placeRowInFirefoxOrder(tab, row);
-    }
-    Rows.syncTabRow(tab);
-    if (!state.pinnedContainer.querySelector(".pfx-tab-row")) {
-      state.pinnedContainer.hidden = true;
-    }
-    Rows.updateVisibility();
-    scheduleSave();
-  }
-  function popSavedByUrl2(url) {
-    return popSavedByUrl(savedTabQueue, url);
-  }
-  function popSavedForTab2(tab) {
-    return popSavedForTab(savedTabQueue, {
-      currentIdx: [...gBrowser.tabs].indexOf(tab),
-      pinnedId: readPinnedId(tab),
-      url: tabUrl(tab),
-      inSessionRestore: _inSessionRestore,
-      log: pfxLog
-    });
-  }
-  function onTabRestoring(e) {
-    const tab = e.target;
-    const url = tabUrl(tab);
-    const idx = [...gBrowser.tabs].indexOf(tab);
-    pfxLog("onTabRestoring", { idx, url, currentId: treeOf.get(tab)?.id, currentParentId: treeOf.get(tab)?.parentId, queueLen: savedTabQueue.length });
-    const entry = popClosedEntry(url);
-    if (!entry) {
-      const td2 = treeData(tab);
-      if (td2.appliedSavedState)
-        return;
-      const correction = popSavedByUrl2(url);
-      if (correction) {
-        pfxLog("onTabRestoring:correction", { idx, url, savedId: correction.id, savedParentId: correction.parentId, parentResolvesTo: tabById(correction.parentId)?.label });
-        td2.id = correction.id || td2.id;
-        td2.parentId = correction.parentId ?? null;
-        td2.name = correction.name || null;
-        td2.state = correction.state || null;
-        td2.collapsed = !!correction.collapsed;
-        td2.appliedSavedState = true;
-        pinTabId(tab, td2.id);
-        Rows.scheduleTreeResync();
-        scheduleSave();
-      }
-      return;
-    }
-    const td = treeData(tab);
-    td.id = entry.id;
-    td.name = entry.name ?? null;
-    td.state = entry.state ?? null;
-    td.collapsed = entry.collapsed ?? false;
-    pinTabId(tab, td.id);
-    td.parentId = entry.parentId ?? null;
-    const parent = tabById(entry.parentId);
-    const row = rowOf.get(tab);
-    if (row) {
-      placeRestoredRow(row, parent, entry.prevSiblingId);
-      if (entry.descendantIds?.length) {
-        const expected = new Set(entry.descendantIds);
-        const oldParentId = entry.parentId ?? null;
-        let n = row.nextElementSibling;
-        while (n && n !== state.spacer) {
-          if (!n._tab)
-            break;
-          const ntd = treeData(n._tab);
-          if (!expected.has(ntd.id))
-            break;
-          if (ntd.parentId === oldParentId) {
-            ntd.parentId = td.id;
-          }
-          n = n.nextElementSibling;
-        }
-      }
-      Rows.scheduleTreeResync();
-    }
-    Rows.updateVisibility();
-    scheduleSave();
-  }
-  function placeRestoredRow(row, parent, prevSiblingId) {
-    const parentRow = parent ? rowOf.get(parent) : null;
-    if (prevSiblingId) {
-      const sib = tabById(prevSiblingId);
-      const sibRow = sib ? rowOf.get(sib) : null;
-      const sibParent = sib ? parentOfTab(sib) : null;
-      const sameParent = !parent && !sibParent || parent && sibParent && treeData(parent).id === treeData(sibParent).id;
-      if (sibRow && sameParent) {
-        const st = subtreeRows(sibRow);
-        st[st.length - 1].after(row);
-        return;
-      }
-    } else {
-      if (parentRow) {
-        parentRow.after(row);
-        return;
-      }
-      state.panel.insertBefore(row, state.panel.firstChild);
-      return;
-    }
-    if (parentRow) {
-      const st = subtreeRows(parentRow);
-      st[st.length - 1].after(row);
-    } else {
-      state.panel.insertBefore(row, state.spacer);
-    }
-  }
-  function rememberClosedTab(tab, td) {
-    const url = tabUrl(tab);
-    if (!url || url === "about:blank")
-      return;
-    const row = rowOf.get(tab);
-    if (!row)
-      return;
-    const parent = parentOfTab(tab);
-    const myLevel = levelOf(tab);
-    let prevSiblingId = null;
-    let r = row.previousElementSibling;
-    while (r) {
-      if (r._tab) {
-        const lvl = levelOf(r._tab);
-        if (lvl < myLevel)
-          break;
-        if (lvl === myLevel) {
-          prevSiblingId = treeData(r._tab).id;
-          break;
-        }
-      }
-      r = r.previousElementSibling;
-    }
-    const descendantIds = [];
-    let n = row.nextElementSibling;
-    while (n && n !== state.spacer) {
-      if (n._tab) {
-        const lvl = levelOf(n._tab);
-        if (lvl <= myLevel)
-          break;
-        descendantIds.push(treeData(n._tab).id);
-      }
-      n = n.nextElementSibling;
-    }
-    closedTabs.push({
-      url,
-      id: td?.id || 0,
-      parentId: parent ? treeData(parent).id : null,
-      prevSiblingId,
-      descendantIds,
-      name: td?.name || null,
-      state: td?.state || null,
-      collapsed: !!td?.collapsed
-    });
-    if (closedTabs.length > CLOSED_MEMORY)
-      closedTabs.shift();
-  }
-  function onTabSelect() {
-    for (const tab of gBrowser.tabs) {
-      const row2 = rowOf.get(tab);
-      if (row2)
-        row2.toggleAttribute("selected", tab.selected);
-    }
-    const row = rowOf.get(gBrowser.selectedTab);
-    if (row && !state.cursor)
-      row.scrollIntoView({ block: "nearest", inline: "nearest" });
-    if (isHorizontal())
-      Rows.updateHorizontalGrid();
-  }
-  function onTabAttrModified(e) {
-    Rows.syncTabRow(e.target);
-  }
-  function isFxPinned(tab) {
-    if (tab.pinned)
-      return true;
-    const ptc = gBrowser.tabContainer?.pinnedTabsContainer || gBrowser.pinnedTabsContainer;
-    return !!ptc && tab.parentNode === ptc;
-  }
-  function placeRowInFirefoxOrder(tab, row) {
-    if (!row || !state.panel)
-      return false;
-    const tabsArr = [...gBrowser.tabs];
-    const myIdx = tabsArr.indexOf(tab);
-    if (myIdx < 0)
-      return false;
-    if (isFxPinned(tab)) {
-      if (!state.pinnedContainer)
-        return false;
-      let prevTab2 = null;
-      for (let i = myIdx - 1;i >= 0; i--) {
-        if (isFxPinned(tabsArr[i])) {
-          prevTab2 = tabsArr[i];
-          break;
-        }
-      }
-      if (prevTab2) {
-        const prevRow = rowOf.get(prevTab2);
-        if (!prevRow || prevRow === row)
-          return false;
-        if (prevRow.nextElementSibling !== row) {
-          prevRow.after(row);
-          return true;
-        }
-      } else if (state.pinnedContainer.firstChild !== row) {
-        state.pinnedContainer.insertBefore(row, state.pinnedContainer.firstChild);
-        return true;
-      }
-      return false;
-    }
-    let prevTab = null;
-    for (let i = myIdx - 1;i >= 0; i--) {
-      if (!isFxPinned(tabsArr[i])) {
-        prevTab = tabsArr[i];
-        break;
-      }
-    }
-    if (prevTab) {
-      const prevRow = rowOf.get(prevTab);
-      if (!prevRow || prevRow === row)
-        return false;
-      const prevSubtree = subtreeRows(prevRow);
-      const anchor = prevSubtree[prevSubtree.length - 1];
-      if (anchor.nextElementSibling !== row) {
-        anchor.after(row);
-        return true;
-      }
-    } else if (state.panel.firstChild !== row) {
-      state.panel.insertBefore(row, state.panel.firstChild);
-      return true;
-    }
-    return false;
-  }
-  function onTabMove(e) {
-    const tab = e.target;
-    const moved = placeRowInFirefoxOrder(tab, rowOf.get(tab));
-    if (moved && !movingTabs.has(tab)) {
-      Rows.scheduleTreeResync();
-      scheduleSave();
-    }
-  }
   var scheduleSave = makeSaver(() => ({
     tabs: [...gBrowser.tabs],
     rows: () => allRows(),
@@ -2619,6 +2691,11 @@
     selectRange,
     sidebarMain
   });
+  var events = makeEvents({
+    rows: Rows,
+    vim,
+    scheduleSave
+  });
   async function loadFromDisk() {
     const parsed = await readTreeFromDisk();
     if (!parsed)
@@ -2630,7 +2707,7 @@
       closedTabs.push(...parsed.closedTabs);
       const tabs = allTabs();
       const tabNodes = parsed.tabNodes.map((s) => ({ ...s }));
-      _lastLoadedNodes = tabNodes.map((s) => ({ ...s }));
+      state.lastLoadedNodes = tabNodes.map((s) => ({ ...s }));
       for (const s of tabNodes) {
         if (s.id && s.id >= state.nextTabId)
           state.nextTabId = s.id + 1;
@@ -2777,48 +2854,13 @@
     vim.createModeline();
     vim.setupVimKeys();
     vim.focusPanel();
-    const tc = gBrowser.tabContainer;
-    tc.addEventListener("TabOpen", onTabOpen);
-    tc.addEventListener("TabClose", onTabClose);
-    tc.addEventListener("TabSelect", onTabSelect);
-    tc.addEventListener("TabAttrModified", onTabAttrModified);
-    tc.addEventListener("TabMove", onTabMove);
-    tc.addEventListener("SSTabRestoring", onTabRestoring);
-    tc.addEventListener("TabPinned", onTabPinned);
-    tc.addEventListener("TabUnpinned", onTabUnpinned);
+    const teardownEvents = events.install();
     state.spacer.addEventListener("click", () => {
-      const rows = allRows().filter((r) => !r.hidden);
-      if (rows.length)
-        vim.activateVim(rows[rows.length - 1]);
+      const visible = allRows().filter((r) => !r.hidden);
+      if (visible.length)
+        vim.activateVim(visible[visible.length - 1]);
     });
-    const onSessionRestored = () => {
-      console.log("palefox-tabs: sessionstore-windows-restored — final tree resync");
-      pfxLog("sessionstore-windows-restored", { queueLen: savedTabQueue.length, inSessionRestore: _inSessionRestore });
-      savedTabQueue.length = 0;
-      _inSessionRestore = false;
-      Rows.scheduleTreeResync();
-    };
-    Services.obs.addObserver(onSessionRestored, "sessionstore-windows-restored");
-    const onManualRestore = () => {
-      const aliveUrls = new Set([...gBrowser.tabs].map((t) => tabUrl(t)).filter((u) => u && u !== "about:blank"));
-      savedTabQueue.length = 0;
-      _lastLoadedNodes.forEach((s, i) => {
-        if (s.url && aliveUrls.has(s.url))
-          return;
-        savedTabQueue.push({ ...s, _origIdx: i });
-      });
-      _inSessionRestore = true;
-      pfxLog("manualRestoreArmed", { queueLen: savedTabQueue.length, queueIds: savedTabQueue.map((s) => s.id) });
-    };
-    Services.obs.addObserver(onManualRestore, "sessionstore-initiating-manual-restore");
-    window.addEventListener("unload", () => {
-      try {
-        Services.obs.removeObserver(onSessionRestored, "sessionstore-windows-restored");
-      } catch {}
-      try {
-        Services.obs.removeObserver(onManualRestore, "sessionstore-initiating-manual-restore");
-      } catch {}
-    }, { once: true });
+    window.addEventListener("unload", teardownEvents, { once: true });
     console.log("palefox-tabs: initialized");
   }
   if (gBrowserInit.delayedStartupFinished) {
