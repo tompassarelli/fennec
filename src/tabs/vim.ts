@@ -626,6 +626,23 @@ export function makeVim(deps: VimDeps): VimAPI {
     }
   }
 
+  /** True iff focus is in the chrome window — i.e. NOT inside a content
+   *  frame (web page, devtools, picture-in-picture, …). Chrome can't read
+   *  content DOM (process boundary), but `Services.focus.focusedWindow`
+   *  always returns the inner-most focused window from chrome's vantage,
+   *  so comparing it to our chrome `window` gives us a reliable bail.
+   *  Tridactyl's per-element `isTextEditable` is content-scope only —
+   *  this is the chrome-side equivalent (broader, but the right granularity
+   *  for "should palefox keys claim this keystroke?"). */
+  function chromeFocused(): boolean {
+    try {
+      const fw = (Services as { focus?: { focusedWindow?: Window } }).focus?.focusedWindow;
+      return !fw || fw === window;
+    } catch {
+      return true;
+    }
+  }
+
   function currentHostBlacklisted(): boolean {
     const host = currentHost();
     if (!host) return false;
@@ -669,16 +686,25 @@ export function makeVim(deps: VimDeps): VimAPI {
     document.addEventListener("keydown", (e) => {
       // Picker has its own input, don't compete.
       if (pickerActive) return;
+      // Content has focus → we don't intercept. The keystroke belongs to
+      // whatever input the user is typing into (chat box, code editor,
+      // search field, contentEditable, etc.). Chrome can't inspect content
+      // DOM across the process boundary, but it CAN tell that focus left
+      // chrome — that's enough to know to stay out of the way.
+      if (!chromeFocused()) return;
       // Per-site escape hatch — let the page own its keys without uninstalling
       // palefox. Toggle via `:blacklist` / `:unblacklist`.
       if (currentHostBlacklisted()) return;
-      // Bail when typing in any input field — those keys are real input.
+      // Bail when typing in any chrome input field — those keys are real input.
       const a = document.activeElement as HTMLElement | null;
       if (a && a !== state.panel && (
         a.tagName === "INPUT" || a.tagName === "input" ||
         a.tagName === "TEXTAREA" || a.tagName === "textarea" ||
         a.isContentEditable
       )) return;
+      // <browser> is the XUL frame element wrapping content — defense in
+      // depth in case `Services.focus` isn't available for some reason.
+      if (a && (a.localName === "browser" || a.tagName === "BROWSER")) return;
       if (a && (a.closest?.("#urlbar") || a.closest?.("findbar") || a.closest?.(".pfx-search-input") || a.closest?.(".pfx-picker"))) return;
 
       // No-modifier global hotkeys (per-binding pref-gated).

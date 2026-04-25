@@ -2558,6 +2558,14 @@
         return "";
       }
     }
+    function chromeFocused() {
+      try {
+        const fw = Services.focus?.focusedWindow;
+        return !fw || fw === window;
+      } catch {
+        return true;
+      }
+    }
     function currentHostBlacklisted() {
       const host = currentHost();
       if (!host)
@@ -2599,10 +2607,14 @@
       document.addEventListener("keydown", (e) => {
         if (pickerActive)
           return;
+        if (!chromeFocused())
+          return;
         if (currentHostBlacklisted())
           return;
         const a = document.activeElement;
         if (a && a !== state.panel && (a.tagName === "INPUT" || a.tagName === "input" || a.tagName === "TEXTAREA" || a.tagName === "textarea" || a.isContentEditable))
+          return;
+        if (a && (a.localName === "browser" || a.tagName === "BROWSER"))
           return;
         if (a && (a.closest?.("#urlbar") || a.closest?.("findbar") || a.closest?.(".pfx-search-input") || a.closest?.(".pfx-picker")))
           return;
