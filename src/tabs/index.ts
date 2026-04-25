@@ -177,9 +177,9 @@ const pfxLog = createLogger("tabs");
   // All rows (tabs + groups) in visual order
   function allRows() {
     const pinned = state.pinnedContainer
-      ? [...pinnedContainer.querySelectorAll(".pfx-tab-row")]
+      ? [...state.pinnedContainer.querySelectorAll(".pfx-tab-row")]
       : [];
-    return [...pinned, ...panel.querySelectorAll(".pfx-tab-row, .pfx-group-row")];
+    return [...pinned, ...state.panel.querySelectorAll(".pfx-tab-row, .pfx-group-row")];
   }
 
   function hasChildren(row) {

@@ -351,8 +351,8 @@
     return [...gBrowser.tabs];
   }
   function allRows() {
-    const pinned = state.pinnedContainer ? [...pinnedContainer.querySelectorAll(".pfx-tab-row")] : [];
-    return [...pinned, ...panel.querySelectorAll(".pfx-tab-row, .pfx-group-row")];
+    const pinned = state.pinnedContainer ? [...state.pinnedContainer.querySelectorAll(".pfx-tab-row")] : [];
+    return [...pinned, ...state.panel.querySelectorAll(".pfx-tab-row, .pfx-group-row")];
   }
   function hasChildren(row) {
     const next = row.nextElementSibling;
