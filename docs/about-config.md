@@ -20,6 +20,12 @@ take effect instantly, JS-driven prefs are noted where reload is needed.
 | `pfx.urlbar.float`                | bool    | `false` | Float the urlbar as a top-layer overlay when focused (lets it expand past the sidebar)                        |
 | `pfx.splitView.outline`           | bool    | `false` | Outline split-view panes for visibility while debugging                                                       |
 
+## Theme
+
+| Pref                  | Type | Default | What it does                                                                                                       |
+| --------------------- | ---- | ------- | ------------------------------------------------------------------------------------------------------------------ |
+| `pfx.theme.useSystem` | bool | `false` | Inherit chrome surface colors from Firefox's theme variables (`--sidebar-background-color`, `--sidebar-text-color`) instead of palefox's opaque literal palette. Off by default to defeat the Linux GTK-transparent-token bug — see [docs/colors.md](colors.md). |
+
 ---
 
 ## Drawer (auto-hide chrome)

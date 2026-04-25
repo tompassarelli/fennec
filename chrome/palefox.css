@@ -13,12 +13,62 @@
 @import url("palefox-tabs.css");
 
 
+/* #region palette
+ *
+ * Palefox paints chrome surfaces with these `--pfx-*` variables. Defaults
+ * are LITERAL `light-dark()` colors — NOT Firefox system tokens — because:
+ *
+ *   1. On Linux, Firefox's `--sidebar-background-color` falls back to the
+ *      `-moz-sidebar` system token, which GTK derives from TextView's
+ *      background. On non-Adwaita / minimal compositor setups that's
+ *      transparent (alpha 0). The `var(...)` expression resolves
+ *      successfully — so our `light-dark()` fallback never fires — and
+ *      KWin / Hyprland / Sway blur composites the desktop through.
+ *   2. Sidebar revamp + verticalTabs is a known regression magnet for
+ *      this exact symptom (Bugzilla 1971487, 2006091, 1860392).
+ *
+ * Two escape hatches:
+ *   - `pfx.theme.useSystem = true` in about:config → use Firefox's
+ *     theme variables when they resolve (still falls back to our literal
+ *     palette so transparent tokens can't bleed through).
+ *   - Override any `--pfx-*` in `chrome/user.css` (not overwritten on
+ *     update). See docs/colors.md.
+ *
+ * `color-scheme: light dark` on `:root` ensures `light-dark()` works and
+ * defends against ancestor color-scheme inversion.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --pfx-bg:           light-dark(#f9f9fb, #1c1b22);
+  --pfx-bg-elevated:  light-dark(#ffffff, #2b2a33);
+  --pfx-bg-popout:    light-dark(#f9f9fb, #1c1b22);
+  --pfx-fg:           light-dark(#15141a, #fbfbfe);
+  --pfx-fg-muted:     light-dark(#5b5b66, #b0b0bb);
+  --pfx-border:       light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.12));
+  --pfx-accent:       light-dark(#0061e0, #00ddff);
+}
+
+/* Opt-in: use Firefox's theme-resolved variables when they're available.
+ * Each falls back to our literal palette so an empty/transparent system
+ * token can't paint nothing. */
+@media -moz-pref("pfx.theme.useSystem") {
+  :root {
+    --pfx-bg:          var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22));
+    --pfx-bg-popout:   var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22));
+    --pfx-fg:          var(--sidebar-text-color, light-dark(#15141a, #fbfbfe));
+  }
+}
+
+/* #endregion palette */
+
+
 /* #region vars */
 
 :root {
   --pfx-gap: 6px;
   --pfx-sidebar-inset: 10px;
-  /* --pfx-color: var(--toolbar-bgcolor, light-dark(#fafafb, #36363a)); */
   --pfx-compact-trigger-width: 4px;
   --pfx-transition-duration: 0.25s;
   --pfx-transition-easing: linear(
@@ -50,7 +100,8 @@
 #sidebar-main {
   overflow: visible !important;
   flex-direction: column !important;
-  background-color: var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22)) !important;
+  background-color: var(--pfx-bg) !important;
+  background-image: none !important;
 }
 
 #sidebar-main > sidebar-main {
@@ -67,7 +118,8 @@
 
 #navigator-toolbox {
   flex: none !important;
-  background-color: var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22)) !important;
+  background-color: var(--pfx-bg) !important;
+  background-image: none !important;
   position: relative !important;
   z-index: 3 !important;
 }
@@ -201,7 +253,8 @@ Preserve these (security warnings):
   width: 100%;
   height: 46px;
   box-sizing: border-box;
-  background-color: var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22));
+  background-color: var(--pfx-bg);
+  background-image: none;
 }
 
 /* #endregion urlbar */

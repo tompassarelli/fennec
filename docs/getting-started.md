@@ -121,6 +121,17 @@ Manager), see the [advanced installation guide](install.md).
 
 ---
 
+## Colors look wrong / sidebar is transparent?
+
+If the sidebar shows the desktop or page through it, see
+**[docs/colors.md](colors.md)**. Short version: this is a Firefox /
+Linux GTK interaction we defend against by default with our own opaque
+`--pfx-bg` palette. You can override any color in `chrome/user.css`,
+or set `pfx.theme.useSystem=true` to opt back into Firefox's theme
+chain.
+
+---
+
 ## What else?
 
 - **Customize without losing changes:** put your overrides in

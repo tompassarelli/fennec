@@ -31,6 +31,9 @@
   overflow-y: auto !important;
   overflow-x: hidden !important;
   scrollbar-width: thin;
+  /* Explicit opaque bg so a translucent ancestor / compositor blur can't
+   * paint through the panel even if #sidebar-main's bg got clobbered. */
+  background-color: var(--pfx-bg);
 }
 #pfx-tab-panel:focus { outline: none; }
 
@@ -86,6 +89,7 @@
  * Horizontal mode and empty-zone state override `display` explicitly. */
 #pfx-pinned-container {
   padding: 2px 0;
+  background-color: var(--pfx-bg);
 }
 #pfx-pinned-container[hidden] {
   display: none !important;
@@ -455,9 +459,12 @@
 }
 
 /* Popout children — solid background so they obscure whatever paints
- * underneath. Applies to popouts in BOTH the panel and pinned containers. */
+ * underneath. Applies to popouts in BOTH the panel and pinned containers.
+ * `var(--pfx-bg-popout)` defaults to an opaque literal so this can't bleed
+ * the toolbar / urlbar / page through (see palefox.css palette region). */
 :is(#pfx-tab-panel, #pfx-pinned-container)[pfx-horizontal] [pfx-popout-child] {
-  background: var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22)) !important;
+  background: var(--pfx-bg-popout) !important;
+  background-image: none !important;
   margin-top: 0;
   margin-bottom: 0;
 }

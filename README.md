@@ -50,6 +50,7 @@ irm https://raw.githubusercontent.com/tompassarelli/palefox/main/install.ps1 -Ou
 - [**Getting started**](docs/getting-started.md) — five-minute orientation, hotkey & pref cheatsheets, sidebar-button modes
 - [Keybindings reference](docs/keybindings.md) — every key Palefox listens for
 - [about:config reference](docs/about-config.md) — every `pfx.*` pref
+- [Colors & theming](docs/colors.md) — the `--pfx-*` palette, overriding in `user.css`, opting into system theme
 - [Full installation guide](docs/install.md)
 - [Nix / Home Manager](docs/nix.md)
 - [Features & options](docs/features.md)
