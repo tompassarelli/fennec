@@ -1859,7 +1859,7 @@ const pfxLog = createLogger("tabs");
   // Drag/drop — see ./drag.ts for the typed implementation. Helpers come
   // from ./helpers.ts directly; we just pass the row-render + sync callbacks.
   const drag = makeDrag({
-    syncTabRow, clearSelection, scheduleTreeResync, scheduleSave,
+    clearSelection, scheduleTreeResync, scheduleSave,
   });
 
   async function loadFromDisk() {

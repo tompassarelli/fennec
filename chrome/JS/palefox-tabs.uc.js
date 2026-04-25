@@ -395,7 +395,7 @@
 
   // src/tabs/drag.ts
   function makeDrag(deps) {
-    const { syncTabRow, clearSelection, scheduleTreeResync, scheduleSave } = deps;
+    const { clearSelection, scheduleTreeResync, scheduleSave } = deps;
     let dragSource = null;
     let dropIndicator = null;
     let dropTarget = null;
@@ -2446,7 +2446,6 @@
     treeData
   }));
   var drag = makeDrag({
-    syncTabRow,
     clearSelection,
     scheduleTreeResync,
     scheduleSave

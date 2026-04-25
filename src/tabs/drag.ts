@@ -45,11 +45,11 @@ export type DropPosition =
   | "into-empty-panel";
 
 export type DragDeps = {
-  // Row-level operations called from drag handlers — still in legacy.
-  readonly syncTabRow: (tab: Tab) => void;
+  /** Clear the multi-select highlight after a drop completes. From legacy. */
   readonly clearSelection: () => void;
-  // Coalesced sync callbacks fired after a drop settles.
+  /** Coalesced full-panel resync — fires after the move animation settles. */
   readonly scheduleTreeResync: () => void;
+  /** Persist tree state to disk. */
   readonly scheduleSave: () => void;
 };
 
@@ -64,7 +64,7 @@ export type DragAPI = {
 // =============================================================================
 
 export function makeDrag(deps: DragDeps): DragAPI {
-  const { syncTabRow, clearSelection, scheduleTreeResync, scheduleSave } = deps;
+  const { clearSelection, scheduleTreeResync, scheduleSave } = deps;
 
   // Closure-private drag/drop cycle state.
   let dragSource: Row | null = null;
