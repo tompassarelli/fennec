@@ -2527,18 +2527,14 @@
         e.stopPropagation();
         if (e.key === "Escape") {
           endSearch(false);
-          focusPanel();
           return;
         }
         if (e.key === "Enter") {
           endSearch(true);
-          if (panelActive)
-            focusPanel();
           return;
         }
         if (e.key === "Backspace" && !input.value) {
           endSearch(false);
-          focusPanel();
           return;
         }
       });
@@ -2563,15 +2559,21 @@
               searchMatches.push(row);
           }
         }
-        if (searchMatches.length === 1 && !refileSource) {
+        let dismissedToContent = false;
+        if (searchMatches.length === 1) {
           const match = searchMatches[0];
           setCursor(match);
           if (match._tab)
             gBrowser.selectedTab = match._tab;
-          panelActive = false;
-          searchMatches = [];
-          searchIdx = -1;
-          sidebarMain.dispatchEvent(new Event("pfx-dismiss"));
+          if (refileSource) {
+            executeRefile(match);
+          } else {
+            panelActive = false;
+            searchMatches = [];
+            searchIdx = -1;
+            sidebarMain.dispatchEvent(new Event("pfx-dismiss"));
+            dismissedToContent = true;
+          }
         } else if (searchMatches.length) {
           searchIdx = 0;
           const first = searchMatches[0];
@@ -2584,22 +2586,34 @@
           modelineMsg("No refile targets found");
         }
         clearFilter();
+        if (searchInput)
+          searchInput.remove();
+        searchInput = null;
+        const prefix = modeline?.querySelector(".pfx-search-prefix");
+        if (prefix)
+          prefix.remove();
+        for (const child of modeline.children)
+          child.hidden = false;
+        updateModeline();
+        if (!dismissedToContent)
+          focusPanel();
       } else {
         searchMatches = [];
         searchIdx = -1;
         clearFilter();
         if (refileSource)
           cancelRefile();
+        if (searchInput)
+          searchInput.remove();
+        searchInput = null;
+        const prefix = modeline?.querySelector(".pfx-search-prefix");
+        if (prefix)
+          prefix.remove();
+        for (const child of modeline.children)
+          child.hidden = false;
+        updateModeline();
+        focusPanel();
       }
-      if (searchInput)
-        searchInput.remove();
-      searchInput = null;
-      const prefix = modeline?.querySelector(".pfx-search-prefix");
-      if (prefix)
-        prefix.remove();
-      for (const child of modeline.children)
-        child.hidden = false;
-      updateModeline();
     }
     function applyFilter(query) {
       const q = query.trim().toLowerCase();

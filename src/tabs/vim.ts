@@ -999,9 +999,11 @@ export function makeVim(deps: VimDeps): VimAPI {
     input.addEventListener("keydown", (e) => {
       e.stopImmediatePropagation();
       e.stopPropagation();
-      if (e.key === "Escape") { endSearch(false); focusPanel(); return; }
-      if (e.key === "Enter") { endSearch(true); if (panelActive) focusPanel(); return; }
-      if (e.key === "Backspace" && !input.value) { endSearch(false); focusPanel(); return; }
+      // endSearch handles its own focus restoration internally — don't
+      // double-focus here.
+      if (e.key === "Escape") { endSearch(false); return; }
+      if (e.key === "Enter") { endSearch(true); return; }
+      if (e.key === "Backspace" && !input.value) { endSearch(false); return; }
     });
   }
 
@@ -1023,14 +1025,26 @@ export function makeVim(deps: VimDeps): VimAPI {
           if (label.includes(q) || url.includes(q)) searchMatches.push(row);
         }
       }
-      if (searchMatches.length === 1 && !refileSource) {
+      // Did we pass focus to content (single-match dismiss)? Tracks whether
+      // we should re-focus the panel below or leave focus where we put it.
+      let dismissedToContent = false;
+
+      if (searchMatches.length === 1) {
         const match = searchMatches[0]!;
         setCursor(match);
         if (match._tab) gBrowser.selectedTab = match._tab;
-        panelActive = false;
-        searchMatches = [];
-        searchIdx = -1;
-        sidebarMain.dispatchEvent(new Event("pfx-dismiss"));
+        if (refileSource) {
+          // Auto-commit refile when there's exactly one target. The user
+          // already disambiguated with their query — don't make them confirm.
+          executeRefile(match);
+        } else {
+          // Normal search single-match: dismiss sidebar, focus content.
+          panelActive = false;
+          searchMatches = [];
+          searchIdx = -1;
+          sidebarMain.dispatchEvent(new Event("pfx-dismiss"));
+          dismissedToContent = true;
+        }
       } else if (searchMatches.length) {
         searchIdx = 0;
         const first = searchMatches[0]!;
@@ -1042,19 +1056,34 @@ export function makeVim(deps: VimDeps): VimAPI {
         modelineMsg("No refile targets found");
       }
       clearFilter();
+
+      // Tear down the search input + prefix from the modeline.
+      if (searchInput) searchInput.remove();
+      searchInput = null;
+      const prefix = modeline?.querySelector(".pfx-search-prefix");
+      if (prefix) prefix.remove();
+      for (const child of modeline.children) (child as HTMLElement).hidden = false;
+      updateModeline();
+
+      // Re-focus the panel UNLESS we just dismissed to content. Search input
+      // had stolen focus (panelActive was set false by the doc keydown's
+      // input-focus auto-deactivate) — without this, a follow-up Enter / n /
+      // N would go to <body> and never reach the vim handler.
+      if (!dismissedToContent) focusPanel();
     } else {
       searchMatches = [];
       searchIdx = -1;
       clearFilter();
       if (refileSource) cancelRefile();
-    }
 
-    if (searchInput) searchInput.remove();
-    searchInput = null;
-    const prefix = modeline?.querySelector(".pfx-search-prefix");
-    if (prefix) prefix.remove();
-    for (const child of modeline.children) (child as HTMLElement).hidden = false;
-    updateModeline();
+      if (searchInput) searchInput.remove();
+      searchInput = null;
+      const prefix = modeline?.querySelector(".pfx-search-prefix");
+      if (prefix) prefix.remove();
+      for (const child of modeline.children) (child as HTMLElement).hidden = false;
+      updateModeline();
+      focusPanel();
+    }
   }
 
   function applyFilter(query: string): void {
