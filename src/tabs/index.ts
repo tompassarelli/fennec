@@ -30,6 +30,7 @@ import {
 } from "./helpers.ts";
 import { createLogger } from "./log.ts";
 import { makeHistory, type HistoryAPI } from "./history.ts";
+import { makeContentFocus, type ContentFocusAPI } from "./content-focus.ts";
 import { makeSaver } from "./snapshot.ts";
 import {
   closedTabs, rowOf, savedTabQueue, selection, state, treeOf,
@@ -103,6 +104,14 @@ const pfxLog = createLogger("tabs");
   // See docs/dev/multi-session-architecture.md for the full design.
   const history: HistoryAPI = makeHistory();
 
+  // Cross-process focus bridge — frame script in every content frame reports
+  // whether the user is typing into a content input (textarea, codemirror,
+  // CodeEditor, contentEditable, role=textbox, etc.). Chrome scope can't see
+  // content DOM directly across e10s, so we ship the same isEditable logic
+  // Vimium uses (lib/dom_utils.js) and forward a boolean back. Used by
+  // setupGlobalKeys() to bail palefox keymap when content is editing.
+  const contentFocus: ContentFocusAPI = makeContentFocus();
+
   // Write-on-every-change: pulls a fresh snapshot for every flush, coalesces
   // overlapping schedules, hands off to history (which dedupes by content
   // hash so no-op snapshots cost zero DB writes).
@@ -152,6 +161,7 @@ const pfxLog = createLogger("tabs");
     selectRange,
     sidebarMain,
     history,
+    contentFocus,
   });
   const events = makeEvents({
     rows: Rows,
@@ -416,6 +426,7 @@ const pfxLog = createLogger("tabs");
     window.addEventListener("unload", () => {
       clearInterval(retentionTimer);
       history.close().catch(() => {});
+      contentFocus.destroy();
     }, { once: true });
 
     // Test-only debug API. Gated on `pfx.test.exposeAPI` so production

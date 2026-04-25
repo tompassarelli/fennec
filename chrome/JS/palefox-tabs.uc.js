@@ -2099,7 +2099,7 @@
   // src/tabs/vim.ts
   var log6 = createLogger("tabs/vim");
   function makeVim(deps) {
-    const { rows, layout, scheduleSave, clearSelection, selectRange, sidebarMain, history } = deps;
+    const { rows, layout, scheduleSave, clearSelection, selectRange, sidebarMain, history, contentFocus } = deps;
     let chord = null;
     let chordTimer = 0;
     let pendingCtrlW = false;
@@ -2558,14 +2558,6 @@
         return "";
       }
     }
-    function chromeFocused() {
-      try {
-        const fw = Services.focus?.focusedWindow;
-        return !fw || fw === window;
-      } catch {
-        return true;
-      }
-    }
     function currentHostBlacklisted() {
       const host = currentHost();
       if (!host)
@@ -2607,14 +2599,12 @@
       document.addEventListener("keydown", (e) => {
         if (pickerActive)
           return;
-        if (!chromeFocused())
+        if (contentFocus.contentInputFocused())
           return;
         if (currentHostBlacklisted())
           return;
         const a = document.activeElement;
         if (a && a !== state.panel && (a.tagName === "INPUT" || a.tagName === "input" || a.tagName === "TEXTAREA" || a.tagName === "textarea" || a.isContentEditable))
-          return;
-        if (a && (a.localName === "browser" || a.tagName === "BROWSER"))
           return;
         if (a && (a.closest?.("#urlbar") || a.closest?.("findbar") || a.closest?.(".pfx-search-input") || a.closest?.(".pfx-picker")))
           return;
@@ -4217,6 +4207,112 @@
     };
   }
 
+  // src/tabs/content-focus.ts
+  var FRAME_SCRIPT_SRC = `
+"use strict";
+(function() {
+  // --- editability check (mirrors Vimium lib/dom_utils.js) ---
+  const UNSELECTABLE_INPUT_TYPES = new Set([
+    "button","checkbox","color","file","hidden","image","radio","reset","submit"
+  ]);
+
+  function isSelectable(el) {
+    if (!(el instanceof Element)) return false;
+    const tag = el.nodeName ? el.nodeName.toLowerCase() : "";
+    if (tag === "input") return !UNSELECTABLE_INPUT_TYPES.has((el.type || "").toLowerCase());
+    if (tag === "textarea") return true;
+    if (el.isContentEditable) return true;
+    return false;
+  }
+
+  function isEditable(el) {
+    if (isSelectable(el)) return true;
+    if (!(el instanceof Element)) return false;
+    const tag = el.nodeName ? el.nodeName.toLowerCase() : "";
+    if (tag === "select") return true;
+    // ARIA: role=textbox is a custom-rolled input field, role=application means
+    // the element manages its own keyboard (Google Docs, sheets, etc.).
+    const role = el.getAttribute && el.getAttribute("role");
+    if (role === "textbox" || role === "searchbox" || role === "application") return true;
+    return false;
+  }
+
+  // Walk shadow roots (Vimium content_scripts/mode_insert.js::getActiveElement).
+  function deepActiveElement() {
+    let a = content.document.activeElement;
+    while (a && a.shadowRoot && a.shadowRoot.activeElement) {
+      a = a.shadowRoot.activeElement;
+    }
+    return a;
+  }
+
+  let lastReported = null;
+  function report() {
+    const editable = isEditable(deepActiveElement());
+    if (editable === lastReported) return;
+    lastReported = editable;
+    sendAsyncMessage("Palefox:FocusState", { editable });
+  }
+
+  addEventListener("focusin",  report, true);
+  addEventListener("focusout", report, true);
+  addEventListener("click",    report, true);
+  addEventListener("DOMContentLoaded", report, true);
+  addEventListener("pagehide", () => {
+    lastReported = false;
+    sendAsyncMessage("Palefox:FocusState", { editable: false });
+  }, true);
+
+  // Initial report on script load.
+  report();
+})();
+`;
+  function makeContentFocus() {
+    const log8 = createLogger("contentFocus");
+    const editablePerBrowser = new WeakMap;
+    const dataUrl = "data:application/javascript;charset=utf-8," + encodeURIComponent(FRAME_SCRIPT_SRC);
+    const mm = gBrowser.messageManager;
+    if (!mm) {
+      log8("init:no-message-manager");
+      return {
+        contentInputFocused: () => false,
+        destroy: () => {}
+      };
+    }
+    function onFocusState(msg) {
+      editablePerBrowser.set(msg.target, !!msg.data.editable);
+    }
+    mm.loadFrameScript(dataUrl, true);
+    mm.addMessageListener("Palefox:FocusState", onFocusState);
+    log8("init", { dataUrlSize: dataUrl.length });
+    function onTabSelect() {
+      try {
+        const browser = gBrowser.selectedBrowser;
+      } catch {}
+    }
+    gBrowser.tabContainer?.addEventListener("TabSelect", onTabSelect);
+    function contentInputFocused() {
+      try {
+        const browser = gBrowser.selectedBrowser;
+        if (!browser)
+          return false;
+        return editablePerBrowser.get(browser) === true;
+      } catch {
+        return false;
+      }
+    }
+    function destroy() {
+      try {
+        mm.removeMessageListener("Palefox:FocusState", onFocusState);
+        mm.removeDelayedFrameScript?.(dataUrl);
+      } catch (e) {
+        log8("destroy:error", { msg: String(e) });
+      }
+      gBrowser.tabContainer?.removeEventListener("TabSelect", onTabSelect);
+    }
+    return { contentInputFocused, destroy };
+  }
+
   // src/tabs/index.ts
   var pfxLog = createLogger("tabs");
   var sidebarMain = document.getElementById("sidebar-main");
@@ -4263,6 +4359,7 @@
     Rows.updateVisibility();
   }
   var history = makeHistory();
+  var contentFocus = makeContentFocus();
   var scheduleSave = makeSaver(() => ({
     tabs: [...gBrowser.tabs],
     rows: () => allRows(),
@@ -4299,7 +4396,8 @@
     clearSelection,
     selectRange,
     sidebarMain,
-    history
+    history,
+    contentFocus
   });
   var events = makeEvents({
     rows: Rows,
@@ -4508,6 +4606,7 @@
     window.addEventListener("unload", () => {
       clearInterval(retentionTimer);
       history.close().catch(() => {});
+      contentFocus.destroy();
     }, { once: true });
     if (Services.prefs.getBoolPref("pfx.test.exposeAPI", false)) {
       window.pfxTest = {
