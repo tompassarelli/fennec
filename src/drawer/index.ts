@@ -282,12 +282,20 @@ function init() {
   //   - _isTabBeingDragged flag: we use querySelector in isGuarded() instead
 
   const COMPACT_PREF = "pfx.sidebar.compact";
+  const HORIZONTAL_COMPACT_PREF = "pfx.toolbar.compact";
   const DEBUG_PREF   = "pfx.debug";
 
-  // How long the sidebar lingers after mouseleave before hiding.
-  // Zen uses 150ms (zen.view.compact.sidebar-keep-hover.duration);
-  // we use 200ms — slightly less twitchy without feeling sluggish.
-  const KEEP_HOVER_DURATION = 200;
+  // Match Zen's defaults exactly so the feel transfers. Zen pref names in
+  // parens, our values match upstream so users coming from Zen don't have
+  // to re-train their muscle memory.
+  // - keepHoverDuration  (zen.view.compact.sidebar-keep-hover.duration)
+  const KEEP_HOVER_DURATION = 150;
+  // Wayland / X11 spurious-mouseleave debounce. Wraps the per-tick check
+  // in setTimeout(_, hoverHackDelay()) so users on flaky compositors can
+  // tune. Zen pref equivalent: zen.view.compact.hover-hack-delay (default 0).
+  function hoverHackDelay() {
+    return Services.prefs.getIntPref("pfx.compact.hoverHackDelay", 0);
+  }
 
   // After an off-screen / strip trigger, schedule an auto-hide after
   // this long — cursor never has to enter the sidebar for the cycle to
@@ -295,6 +303,23 @@ function init() {
   // Matches Zen's `zen.view.compact.toolbar-hide-after-hover.duration`
   // (default 1000ms) used in `flashElement(target, hideAfterHoverDuration)`.
   const OFFSCREEN_SHOW_DURATION = 1000;
+
+  // Once a collapse is committed (pfx-has-hover removed), block reveal
+  // attempts until the close animation finishes. Without this, a hover
+  // event fired mid-collapse races with the slide-out and produces a
+  // flicker / partial open. Matches the CSS --pfx-transition-duration
+  // (250ms) plus a small margin. Same protective intent as Firefox's
+  // _addHoverStateBlocker pattern in browser-sidebar.js (~line 1452).
+  const COLLAPSE_PROTECTION_DURATION = 280;
+  let _collapseProtectedUntil = 0;
+  let _collapseProtectedHzUntil = 0;
+
+  // Horizontal-compact state (parallel to vertical). Lives alongside the
+  // existing sidebar compact infrastructure; only one mode is active at
+  // a time (auto-swapped on `sidebar.verticalTabs` pref change).
+  let hoverStripTop = null;
+  let urlbarCompactObserverHz = null;
+  let _hzFlashTimer = null;
 
   // Programmatic-flash duration for callers that want to draw attention
   // to the sidebar (matches Zen's
@@ -478,7 +503,9 @@ function init() {
       // tearing the attribute down underneath it.
       dbg("reconcileCompactState:flashPending");
     } else {
-      sidebarMain.removeAttribute("pfx-has-hover");
+      // Route through setHover(false) so the collapse-protection window
+      // stamps consistently, regardless of which path requested the hide.
+      setHover(false);
       cancelHideWatchdog();
     }
     dbg("reconcileCompactState", {
@@ -520,7 +547,10 @@ function init() {
   // implicit hover, toolbar panel state). Ours is trivial because
   // we have one sidebar and one attribute.
   function setHover(value) {
-    dbg("setHover", { value });
+    dbg("setHover", {
+      value,
+      collapseProtectedRemaining: Math.max(0, _collapseProtectedUntil - Date.now()),
+    });
     if (value && _ignoreNextHover) {
       // Zen pattern (animateCompactMode:455): actively force-hide when
       // _ignoreNextHover is set, rather than just early-returning from callers.
@@ -529,9 +559,26 @@ function init() {
       return;
     }
     if (value) {
+      // Reveal — DROP if a collapse animation is still in flight. Once
+      // collapse executes, it runs to completion uninterrupted; reveal
+      // events that fire mid-collapse are discarded. The user can hover
+      // again after the protection window expires if they still want
+      // the sidebar shown. This is per the project rule documented in
+      // docs/compact-mode-dissertation.md.
+      const collapseRemaining = _collapseProtectedUntil - Date.now();
+      if (collapseRemaining > 0) {
+        dbg("setHover:revealDropped", { collapseRemaining });
+        return;
+      }
       sidebarMain.setAttribute("pfx-has-hover", "true");
-    } else {
+      return;
+    }
+    // Collapse — only stamp the protection window if the attribute was
+    // actually present (i.e., we're committing to an animated close).
+    // No-op cases (already hidden) shouldn't lock out reveals.
+    if (sidebarMain.hasAttribute("pfx-has-hover")) {
       sidebarMain.removeAttribute("pfx-has-hover");
+      _collapseProtectedUntil = Date.now() + COLLAPSE_PROTECTION_DURATION;
     }
   }
 
@@ -612,7 +659,7 @@ function init() {
         dbg("onSidebarEnter:show", { targetId });
         setHover(true);
       });
-    }, 0);
+    }, hoverHackDelay());
   }
 
   // Mouse leaves sidebar. Verify leave is real, then schedule hide.
@@ -652,7 +699,7 @@ function init() {
       }
       dbg("onSidebarLeave:flash", { targetId, duration: lingerMs });
       flashSidebar(lingerMs);
-    }, 0);
+    }, hoverHackDelay());
   }
 
   function compactEnable() {
@@ -774,52 +821,282 @@ function init() {
     document.documentElement.removeEventListener("mouseleave", onDocMouseLeave);
   }
 
-  function compactToggle() {
-    const active = sidebarMain.hasAttribute("data-pfx-compact");
-    dbg("compactToggle", { wasActive: active });
-    if (active) {
-      compactDisable();
-      Services.prefs.setBoolPref(COMPACT_PREF, false);
-    } else {
-      _ignoreNextHover = true;
-      compactEnable();
-      Services.prefs.setBoolPref(COMPACT_PREF, true);
-      // Clear after the CSS hide transition completes (transform, 250ms).
-      //
-      // Cannot use mouseleave: adding data-pfx-compact applies pointer-events:none
-      // immediately (not after the animation), firing a synthetic mouseleave on the
-      // sidebar. That clears _ignoreNextHover before the hover strip's mouseenter
-      // guard fires, letting the sidebar immediately re-open.
-      //
-      // Zen clears _ignoreNextHover inside animateCompactMode().then() — after the
-      // animation promise resolves. Our equivalent: transitionend on "transform".
-      // F-B from compact-mode-dissertation.md: the safety timer / transition
-      // end now both funnel through reconcileCompactState() so the
-      // post-transition state is *coherent*, not just "_ignoreNextHover
-      // cleared". This eliminates the case where the safety timer clears
-      // _ignoreNextHover but pfx-has-hover was set during the transition
-      // and stays set forever (P2/P3/P7 in the dissertation).
-      const safetyTimer = setTimeout(
-        () => reconcileCompactState("safety-timer-400ms"),
-        400,
-      );
-      sidebarMain.addEventListener("transitionend", function onTransitionEnd(e) {
-        if (e.target !== sidebarMain || e.propertyName !== "transform") return;
-        sidebarMain.removeEventListener("transitionend", onTransitionEnd);
-        clearTimeout(safetyTimer);
-        reconcileCompactState("transitionend-transform");
-      });
+  // === Horizontal compact ===
+  // Parallel implementation: navigator-toolbox autohides upward, top hover
+  // strip reveals it. Shares helpers (_ignoreNextHover, isGuarded, popup
+  // counter); has its own flash timer / hover strip / collapse-protection.
+
+  function setToolboxHover(value) {
+    dbg("setToolboxHover", { value });
+    if (value && _ignoreNextHover) {
+      navigatorToolbox.removeAttribute("pfx-has-hover");
+      return;
+    }
+    if (value) {
+      if (Date.now() < _collapseProtectedHzUntil) {
+        dbg("setToolboxHover:revealDropped");
+        return;
+      }
+      navigatorToolbox.setAttribute("pfx-has-hover", "true");
+      return;
+    }
+    if (navigatorToolbox.hasAttribute("pfx-has-hover")) {
+      navigatorToolbox.removeAttribute("pfx-has-hover");
+      _collapseProtectedHzUntil = Date.now() + COLLAPSE_PROTECTION_DURATION;
     }
   }
 
-  // Initialize from pref on startup
-  if (Services.prefs.getBoolPref(COMPACT_PREF, false)) {
-    compactEnable();
+  function flashToolbox(duration) {
+    if (_hzFlashTimer) {
+      clearTimeout(_hzFlashTimer);
+      dbg("flashToolbox:extend", { duration });
+    } else {
+      dbg("flashToolbox:show", { duration });
+      requestAnimationFrame(() => setToolboxHover(true));
+    }
+    _hzFlashTimer = setTimeout(() => {
+      requestAnimationFrame(() => {
+        reconcileCounterIfStale();
+        if (isGuarded()) {
+          dbg("flashToolbox:hide-blocked");
+          scheduleHideWatchdogHz();
+        } else {
+          setToolboxHover(false);
+        }
+        _hzFlashTimer = null;
+      });
+    }, duration);
   }
 
-  // Live-toggle via about:config without restart
+  function clearFlashToolbox() {
+    if (_hzFlashTimer) clearTimeout(_hzFlashTimer);
+    _hzFlashTimer = null;
+  }
+
+  // Horizontal-mode counterpart to reconcileCompactState. Same shape, but
+  // operates on navigatorToolbox + hoverStripTop and uses the horizontal
+  // collapse-protection / flash / watchdog state.
+  function reconcileCompactStateHorizontal(trigger) {
+    if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal")) return;
+    const before = {
+      hover: navigatorToolbox.hasAttribute("pfx-has-hover"),
+      flashPending: _hzFlashTimer !== null,
+      _ignoreNextHover,
+      _openPopups,
+    };
+    _ignoreNextHover = false;
+    reconcileCounterIfStale();
+    const cursorOver = navigatorToolbox.matches(":hover")
+      || hoverStripTop?.matches(":hover");
+    const guarded = isGuarded();
+    if (guarded || cursorOver) {
+      if (!navigatorToolbox.hasAttribute("pfx-has-hover")) {
+        navigatorToolbox.setAttribute("pfx-has-hover", "true");
+      }
+      scheduleHideWatchdogHz();
+    } else if (_hzFlashTimer !== null) {
+      dbg("reconcileCompactStateHorizontal:flashPending");
+    } else {
+      setToolboxHover(false);
+      cancelHideWatchdogHz();
+    }
+    dbg("reconcileCompactStateHorizontal", {
+      trigger, before, cursorOver, guarded,
+      after: {
+        hover: navigatorToolbox.hasAttribute("pfx-has-hover"),
+        flashPending: _hzFlashTimer !== null,
+        _ignoreNextHover,
+      },
+    });
+  }
+
+  let hideWatchdogTimerHz = null;
+  function scheduleHideWatchdogHz() {
+    if (hideWatchdogTimerHz) return;
+    hideWatchdogTimerHz = setTimeout(() => {
+      hideWatchdogTimerHz = null;
+      reconcileCompactStateHorizontal("hide-watchdog-1s-hz");
+    }, 1000);
+  }
+  function cancelHideWatchdogHz() {
+    if (hideWatchdogTimerHz) {
+      clearTimeout(hideWatchdogTimerHz);
+      hideWatchdogTimerHz = null;
+    }
+  }
+
+  function onToolboxEnter(event) {
+    setTimeout(() => {
+      if (!event.target.matches(":hover")) return;
+      if (event.target.closest("panel")) return;
+      clearFlashToolbox();
+      requestAnimationFrame(() => {
+        if (_ignoreNextHover) return;
+        if (navigatorToolbox.hasAttribute("pfx-has-hover")) return;
+        setToolboxHover(true);
+      });
+    }, hoverHackDelay());
+  }
+
+  function onToolboxLeave(event) {
+    const exitedWindow = !event.relatedTarget;
+    const lingerMs = exitedWindow ? OFFSCREEN_SHOW_DURATION : KEEP_HOVER_DURATION;
+    setTimeout(() => {
+      if (event.target.matches(":hover")) return;
+      if (_ignoreNextHover) return;
+      if (isGuarded()) return;
+      flashToolbox(lingerMs);
+    }, hoverHackDelay());
+  }
+
+  function onDocMouseLeaveTop(e) {
+    if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal")) return;
+    if (navigatorToolbox.hasAttribute("pfx-has-hover")) return;
+    if (_ignoreNextHover) return;
+    const triggerHeight = parseInt(
+      getComputedStyle(document.documentElement)
+        .getPropertyValue("--pfx-compact-trigger-width") || "8",
+      10,
+    );
+    if (e.clientY > triggerHeight * 3) return;
+    dbg("onDocMouseLeaveTop:show", { clientY: e.clientY });
+    flashToolbox(OFFSCREEN_SHOW_DURATION);
+  }
+
+  function compactEnableHorizontal() {
+    if (document.documentElement.hasAttribute("data-pfx-compact-horizontal")) return;
+    dbg("compactEnableHorizontal");
+    document.documentElement.setAttribute("data-pfx-compact-horizontal", "");
+
+    if (urlbar && !urlbarCompactObserverHz) {
+      urlbar.removeAttribute("popover");
+      urlbarCompactObserverHz = new MutationObserver(() => {
+        if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal")) return;
+        if (urlbar.hasAttribute("breakout-extend")) {
+          urlbar.setAttribute("popover", "manual");
+          if (!urlbar.matches(":popover-open")) urlbar.showPopover();
+        } else {
+          urlbar.removeAttribute("popover");
+        }
+      });
+      urlbarCompactObserverHz.observe(urlbar, { attributes: true, attributeFilter: ["breakout-extend"] });
+    }
+
+    if (!hoverStripTop || !hoverStripTop.isConnected) {
+      hoverStripTop = document.createXULElement("box");
+      hoverStripTop.id = "pfx-hover-strip-top";
+      document.documentElement.appendChild(hoverStripTop);
+      hoverStripTop.addEventListener("mouseenter", () => {
+        if (_ignoreNextHover) return;
+        flashToolbox(OFFSCREEN_SHOW_DURATION);
+      });
+    }
+
+    navigatorToolbox.addEventListener("mouseover", onToolboxEnter);
+    navigatorToolbox.addEventListener("mouseleave", onToolboxLeave);
+    document.documentElement.addEventListener("mouseleave", onDocMouseLeaveTop);
+  }
+
+  function compactDisableHorizontal() {
+    if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal")) return;
+    dbg("compactDisableHorizontal");
+    clearFlashToolbox();
+    cancelHideWatchdogHz();
+    document.documentElement.removeAttribute("data-pfx-compact-horizontal");
+    navigatorToolbox.removeAttribute("pfx-has-hover");
+
+    urlbarCompactObserverHz?.disconnect();
+    urlbarCompactObserverHz = null;
+    if (urlbar) {
+      urlbar.setAttribute("popover", "manual");
+      if (!urlbar.matches(":popover-open")) urlbar.showPopover();
+    }
+
+    if (hoverStripTop) {
+      hoverStripTop.remove();
+      hoverStripTop = null;
+    }
+
+    navigatorToolbox.removeEventListener("mouseover", onToolboxEnter);
+    navigatorToolbox.removeEventListener("mouseleave", onToolboxLeave);
+    document.documentElement.removeEventListener("mouseleave", onDocMouseLeaveTop);
+  }
+
+  function compactToggle() {
+    const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
+    if (vertical) {
+      const active = sidebarMain.hasAttribute("data-pfx-compact");
+      dbg("compactToggle:vertical", { wasActive: active });
+      if (active) {
+        compactDisable();
+        Services.prefs.setBoolPref(COMPACT_PREF, false);
+      } else {
+        _ignoreNextHover = true;
+        compactEnable();
+        Services.prefs.setBoolPref(COMPACT_PREF, true);
+        // F-B: safety timer + transitionend both funnel through
+        // reconcileCompactState(). See dissertation.
+        const safetyTimer = setTimeout(
+          () => reconcileCompactState("safety-timer-400ms"),
+          400,
+        );
+        sidebarMain.addEventListener("transitionend", function onTransitionEnd(e) {
+          if (e.target !== sidebarMain || e.propertyName !== "transform") return;
+          sidebarMain.removeEventListener("transitionend", onTransitionEnd);
+          clearTimeout(safetyTimer);
+          reconcileCompactState("transitionend-transform");
+        });
+      }
+    } else {
+      const active = document.documentElement.hasAttribute("data-pfx-compact-horizontal");
+      dbg("compactToggle:horizontal", { wasActive: active });
+      if (active) {
+        compactDisableHorizontal();
+        Services.prefs.setBoolPref(HORIZONTAL_COMPACT_PREF, false);
+      } else {
+        _ignoreNextHover = true;
+        compactEnableHorizontal();
+        Services.prefs.setBoolPref(HORIZONTAL_COMPACT_PREF, true);
+        const safetyTimer = setTimeout(
+          () => reconcileCompactStateHorizontal("safety-timer-400ms-hz"),
+          400,
+        );
+        navigatorToolbox.addEventListener("transitionend", function onTransitionEnd(e) {
+          if (e.target !== navigatorToolbox || e.propertyName !== "transform") return;
+          navigatorToolbox.removeEventListener("transitionend", onTransitionEnd);
+          clearTimeout(safetyTimer);
+          reconcileCompactStateHorizontal("transitionend-transform-hz");
+        });
+      }
+    }
+  }
+
+  // Initialize from pref on startup. Only the pref matching the current
+  // tab-layout mode is honored — the other mode's pref is remembered for
+  // when the user switches.
+  function applyCompactForCurrentMode() {
+    const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
+    if (vertical) {
+      if (Services.prefs.getBoolPref(COMPACT_PREF, false)
+          && !sidebarMain.hasAttribute("data-pfx-compact")) {
+        compactEnable();
+      }
+    } else {
+      if (Services.prefs.getBoolPref(HORIZONTAL_COMPACT_PREF, false)
+          && !document.documentElement.hasAttribute("data-pfx-compact-horizontal")) {
+        compactEnableHorizontal();
+      }
+    }
+  }
+  applyCompactForCurrentMode();
+
+  // Live-toggle via about:config without restart. Each pref only takes
+  // effect if its mode is currently active; otherwise it's saved for
+  // later (when the user switches modes).
   const compactObserver = {
     observe() {
+      const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
+      if (!vertical) return; // pref change applies on next mode-swap
       const enabled = Services.prefs.getBoolPref(COMPACT_PREF, false);
       const active = sidebarMain.hasAttribute("data-pfx-compact");
       if (enabled && !active) compactEnable();
@@ -828,13 +1105,47 @@ function init() {
   };
   Services.prefs.addObserver(COMPACT_PREF, compactObserver);
 
+  const compactObserverHz = {
+    observe() {
+      const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
+      if (vertical) return;
+      const enabled = Services.prefs.getBoolPref(HORIZONTAL_COMPACT_PREF, false);
+      const active = document.documentElement.hasAttribute("data-pfx-compact-horizontal");
+      if (enabled && !active) compactEnableHorizontal();
+      else if (!enabled && active) compactDisableHorizontal();
+    },
+  };
+  Services.prefs.addObserver(HORIZONTAL_COMPACT_PREF, compactObserverHz);
+
+  // Auto-swap when the user flips between vertical and horizontal tabs.
+  // Tear down the mode that's leaving, apply the pref for the mode that's
+  // arriving. Avoids dangling state (e.g. data-pfx-compact-horizontal still
+  // on root after swap to vertical mode).
+  const verticalTabsObserver = {
+    observe() {
+      const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
+      dbg("verticalTabs:change", { vertical });
+      if (vertical) {
+        compactDisableHorizontal();
+      } else {
+        compactDisable();
+      }
+      applyCompactForCurrentMode();
+    },
+  };
+  Services.prefs.addObserver("sidebar.verticalTabs", verticalTabsObserver);
+
   // Remove pref observers when this window closes so they don't fire
   // against dead DOM nodes after the window is gone.
   window.addEventListener("unload", () => {
     Services.prefs.removeObserver(DRAGGABLE_PREF, draggableObserver);
     Services.prefs.removeObserver(COMPACT_PREF, compactObserver);
+    Services.prefs.removeObserver(HORIZONTAL_COMPACT_PREF, compactObserverHz);
+    Services.prefs.removeObserver("sidebar.verticalTabs", verticalTabsObserver);
     cancelHideWatchdog();
+    cancelHideWatchdogHz();
     clearFlash();
+    clearFlashToolbox();
   }, { once: true });
 
   // F-F: sizemodechange (minimize/maximize/restore) reconciles
@@ -859,13 +1170,9 @@ function init() {
   });
 
   // === Sidebar Button ===
-  // Left-click: toggle compact mode
-  // Right-click: context menu with "Collapse Layout"
-
-  // === Sidebar Button ===
   // Hide the native button, create our own. Avoids fighting XUL command
-  // wiring. Our button uses the native #toolbar-context-menu (overloaded
-  // with our items) so the user gets the full original menu plus ours.
+  // wiring. Left-click: toggle compact mode (dispatches per layout).
+  // Right-click: our own custom #pfx-sidebar-button-menu (wired below).
 
   const sidebarButton = document.getElementById("sidebar-button");
   if (sidebarButton) {
@@ -878,29 +1185,10 @@ function init() {
     const pfxButton = document.createXULElement("toolbarbutton");
     pfxButton.id = "pfx-sidebar-button";
     pfxButton.className = sidebarButton.className;
-    pfxButton.setAttribute("context", "toolbar-context-menu");
-
-    // Tooltip reflects the left-click action — which depends on layout mode.
-    // Vertical: toggle compact. Horizontal: toggle bookmarks sidebar.
-    function updatePfxButtonTooltip() {
-      const vertical = Services.prefs.getBoolPref(
-        "sidebar.verticalTabs", true
-      );
-      pfxButton.setAttribute(
-        "tooltiptext",
-        vertical
-          ? "Toggle compact mode (right-click for more)"
-          : "Toggle sidebar (right-click for more)"
-      );
-    }
-    updatePfxButtonTooltip();
-    const pfxButtonTooltipObserver = { observe: updatePfxButtonTooltip };
-    Services.prefs.addObserver("sidebar.verticalTabs", pfxButtonTooltipObserver);
-    window.addEventListener("unload", () => {
-      Services.prefs.removeObserver(
-        "sidebar.verticalTabs", pfxButtonTooltipObserver
-      );
-    }, { once: true });
+    pfxButton.setAttribute(
+      "tooltiptext",
+      "Toggle compact mode (right-click for more)"
+    );
     // Copy CUI attributes so Firefox's popupshowing logic recognizes
     // our button as a real toolbar widget
     for (const attr of [
@@ -919,29 +1207,9 @@ function init() {
     }
     sidebarButton.after(pfxButton);
 
-    // Left-click action depends on layout mode:
-    //   Vertical:   toggle compact mode (autohide ↔ visible).
-    //   Horizontal: toggle the bookmarks/history sidebar widget. There's
-    //               no compact concept in horizontal mode (no sidebar to
-    //               autohide), so the button gets the more useful action.
     pfxButton.addEventListener("click", (e) => {
       if (e.button !== 0) return;
-      const vertical = Services.prefs.getBoolPref(
-        "sidebar.verticalTabs", true
-      );
-      if (vertical) {
-        compactToggle();
-        return;
-      }
-      try {
-        const win = window;
-        if (win.SidebarController?.toggle) { win.SidebarController.toggle(); return; }
-        if (win.SidebarUI?.toggle) { win.SidebarUI.toggle(); return; }
-        const cmd = document.getElementById("cmd_toggleSidebar");
-        if (cmd?.doCommand) { cmd.doCommand(); return; }
-      } catch (err) {
-        console.error("palefox: pfx-button sidebar toggle failed", err);
-      }
+      compactToggle();
     });
 
     // Custom context menu — owned by us, not overloaded onto Firefox's
@@ -1027,10 +1295,11 @@ function init() {
     // menu paints with the right labels, click hits the right item.
     pfxMenu.addEventListener("popupshowing", () => {
       const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
-      const isCompact = sidebarMain.hasAttribute("data-pfx-compact");
+      const isCompactVertical = sidebarMain.hasAttribute("data-pfx-compact");
+      const isCompactHorizontal = document.documentElement.hasAttribute("data-pfx-compact-horizontal");
+      const isCompact = vertical ? isCompactVertical : isCompactHorizontal;
       compactItem.setAttribute("label",
         isCompact ? "Disable Compact" : "Enable Compact");
-      compactItem.hidden = !vertical; // compact concept is vertical-only
 
       collapseItem.hidden = !vertical;
       if (vertical) {
@@ -1048,23 +1317,28 @@ function init() {
       layoutItem.setAttribute("label",
         vertical ? "Horizontal Tabs" : "Vertical Tabs");
 
-      // Pin the sidebar visible while our menu is open. We're already
-      // doing this implicitly via the _openPopups counter, but
-      // mouseleave + flashSidebar's 300ms callback can race with
-      // popupshown firing — the explicit attribute set + clearFlash
-      // makes "menu open ⇒ sidebar visible" a deterministic invariant.
-      if (isCompact) {
+      // Pin the active surface visible while our menu is open. The
+      // _openPopups counter does this implicitly, but mouseleave +
+      // flashSidebar's callback can race with popupshown — the
+      // explicit attribute set + clearFlash makes "menu open ⇒ visible"
+      // a deterministic invariant.
+      if (isCompactVertical) {
         sidebarMain.setAttribute("pfx-has-hover", "true");
         clearFlash();
       }
+      if (isCompactHorizontal) {
+        navigatorToolbox.setAttribute("pfx-has-hover", "true");
+        clearFlashToolbox();
+      }
 
-      dbg("pfxMenu:popupshowing", { vertical, isCompact, sidebarOpen });
+      dbg("pfxMenu:popupshowing", { vertical, isCompactVertical, isCompactHorizontal, sidebarOpen });
     });
 
     pfxMenu.addEventListener("popuphidden", () => {
-      // After our menu closes, reconcile so the sidebar can hide if
-      // the cursor isn't on it and no other guard is active.
+      // After our menu closes, reconcile the active surface so it can
+      // hide if the cursor isn't on it and no other guard is active.
       reconcileCompactState("pfxMenu:popuphidden");
+      reconcileCompactStateHorizontal("pfxMenu:popuphidden");
     });
   }
 

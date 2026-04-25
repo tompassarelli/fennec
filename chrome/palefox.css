@@ -451,6 +451,45 @@ Preserve these (security warnings):
   }
 }
 
+/* Horizontal compact — applies when sidebar.verticalTabs is OFF. Hides
+ * the navigator-toolbox above the viewport; revealed by the top hover
+ * strip or by cursor entering the toolbox itself.
+ *
+ * State attribute is on documentElement (not navigator-toolbox itself)
+ * so the parallel structure mirrors the vertical case: a "compact mode
+ * is enabled" attribute that exists independently of "currently visible". */
+:root[data-pfx-compact-horizontal] #navigator-toolbox {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  z-index: 10 !important;
+  pointer-events: none !important;
+  transform: translateY(-100%) !important;
+  transition: transform var(--pfx-transition-duration) var(--pfx-transition-easing) !important;
+}
+
+:root[data-pfx-compact-horizontal] #navigator-toolbox[pfx-has-hover] {
+  transform: translateY(0) !important;
+  pointer-events: auto !important;
+}
+
+#pfx-hover-strip-top {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: var(--pfx-compact-trigger-width) !important;
+  z-index: 9 !important;
+  background: transparent !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-pfx-compact-horizontal] #navigator-toolbox {
+    transition: none !important;
+  }
+}
+
 /* #endregion compact mode */
 
 
