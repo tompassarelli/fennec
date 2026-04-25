@@ -694,6 +694,138 @@
     return { setupDrag, setupPinnedContainerDrop, setupPanelDrop };
   }
 
+  // src/tabs/menu.ts
+  function buildContextMenu(deps) {
+    const {
+      startRename,
+      toggleCollapse,
+      createGroupRow,
+      setCursor,
+      updateVisibility,
+      scheduleSave
+    } = deps;
+    const menu = document.createXULElement("menupopup");
+    menu.id = "pfx-tab-menu";
+    function mi(label, handler) {
+      const item = document.createXULElement("menuitem");
+      item.setAttribute("label", label);
+      item.addEventListener("command", handler);
+      return item;
+    }
+    const sep = () => document.createXULElement("menuseparator");
+    const renameItem = mi("Rename Tab", () => {
+      if (state.contextTab) {
+        const row = rowOf.get(state.contextTab);
+        if (row)
+          startRename(row);
+      }
+    });
+    const collapseItem = mi("Collapse", () => {
+      if (!state.contextTab)
+        return;
+      const row = rowOf.get(state.contextTab);
+      if (row)
+        toggleCollapse(row);
+    });
+    const createGroupItem = mi("Create Group", () => {
+      if (!state.contextTab)
+        return;
+      const row = rowOf.get(state.contextTab);
+      if (!row)
+        return;
+      const grp = createGroupRow("New Group", levelOfRow(row));
+      const st = subtreeRows(row);
+      st[st.length - 1].after(grp);
+      setCursor(grp);
+      updateVisibility();
+      scheduleSave();
+      startRename(grp);
+    });
+    const closeKidsItem = mi("Close Children", () => {
+      if (!state.contextTab)
+        return;
+      const row = rowOf.get(state.contextTab);
+      if (!row)
+        return;
+      const kids = subtreeRows(row).slice(1);
+      for (let i = kids.length - 1;i >= 0; i--) {
+        const k = kids[i];
+        if (k._tab)
+          gBrowser.removeTab(k._tab);
+        else
+          k.remove();
+      }
+    });
+    const splitViewItem = mi("Add Split View", () => {
+      if (!state.contextTab)
+        return;
+      TabContextMenu.contextTab = state.contextTab;
+      TabContextMenu.contextTabs = [state.contextTab];
+      TabContextMenu.moveTabsToSplitView();
+    });
+    const reloadItem = mi("Reload Tab", () => {
+      if (state.contextTab)
+        gBrowser.reloadTab(state.contextTab);
+    });
+    const muteItem = mi("Mute Tab", () => {
+      if (state.contextTab)
+        state.contextTab.toggleMuteAudio();
+    });
+    const pinItem = mi("Pin Tab", () => {
+      if (!state.contextTab)
+        return;
+      if (state.contextTab.pinned)
+        gBrowser.unpinTab(state.contextTab);
+      else
+        gBrowser.pinTab(state.contextTab);
+    });
+    const duplicateItem = mi("Duplicate Tab", () => {
+      if (state.contextTab)
+        gBrowser.duplicateTab(state.contextTab);
+    });
+    const bookmarkItem = mi("Bookmark Tab", () => {
+      if (state.contextTab)
+        PlacesCommandHook.bookmarkTabs([state.contextTab]);
+    });
+    const moveToWindowItem = mi("Move to New Window", () => {
+      if (state.contextTab)
+        gBrowser.replaceTabWithWindow(state.contextTab);
+    });
+    const copyLinkItem = mi("Copy Link", () => {
+      if (!state.contextTab)
+        return;
+      const url = state.contextTab.linkedBrowser?.currentURI?.spec;
+      if (url) {
+        Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper).copyString(url);
+      }
+    });
+    const closeItem = mi("Close Tab", () => {
+      if (state.contextTab)
+        gBrowser.removeTab(state.contextTab);
+    });
+    const reopenItem = mi("Reopen Closed Tab", () => {
+      undoCloseTab();
+    });
+    menu.append(renameItem, collapseItem, createGroupItem, closeKidsItem, sep(), splitViewItem, reloadItem, muteItem, pinItem, duplicateItem, sep(), bookmarkItem, copyLinkItem, moveToWindowItem, sep(), closeItem, reopenItem);
+    menu.addEventListener("popupshowing", () => {
+      if (!state.contextTab)
+        return;
+      const row = rowOf.get(state.contextTab);
+      const has = !!row && hasChildren(row);
+      collapseItem.hidden = !has;
+      closeKidsItem.hidden = !has;
+      if (has && row) {
+        const d = dataOf(row);
+        collapseItem.setAttribute("label", d?.collapsed ? "Expand" : "Collapse");
+      }
+      muteItem.setAttribute("label", state.contextTab.hasAttribute("muted") ? "Unmute Tab" : "Mute Tab");
+      pinItem.setAttribute("label", state.contextTab.pinned ? "Unpin Tab" : "Pin Tab");
+      splitViewItem.hidden = !!state.contextTab.splitview;
+    });
+    document.getElementById("mainPopupSet").appendChild(menu);
+    return menu;
+  }
+
   // src/tabs/index.ts
   var pfxLog = createLogger("tabs");
   var sidebarMain = document.getElementById("sidebar-main");
@@ -2253,122 +2385,6 @@
       row.hidden = false;
     updateVisibility();
   }
-  function setupContextMenu() {
-    const menu = document.createXULElement("menupopup");
-    menu.id = "pfx-tab-menu";
-    function mi(label, handler) {
-      const item = document.createXULElement("menuitem");
-      item.setAttribute("label", label);
-      item.addEventListener("command", handler);
-      return item;
-    }
-    const sep = () => document.createXULElement("menuseparator");
-    const renameItem = mi("Rename Tab", () => {
-      if (state.contextTab)
-        startRename(rowOf.get(state.contextTab));
-    });
-    const collapseItem = mi("Collapse", () => {
-      if (!state.contextTab)
-        return;
-      const row = rowOf.get(state.contextTab);
-      if (row)
-        toggleCollapse(row);
-    });
-    const createGroupItem = mi("Create Group", () => {
-      if (!state.contextTab)
-        return;
-      const row = rowOf.get(state.contextTab);
-      if (!row)
-        return;
-      const grp = createGroupRow("New Group", levelOfRow(row));
-      const st = subtreeRows(row);
-      st[st.length - 1].after(grp);
-      setCursor(grp);
-      updateVisibility();
-      scheduleSave();
-      startRename(grp);
-    });
-    const closeKidsItem = mi("Close Children", () => {
-      if (!state.contextTab)
-        return;
-      const row = rowOf.get(state.contextTab);
-      if (!row)
-        return;
-      const kids = subtreeRows(row).slice(1);
-      for (let i = kids.length - 1;i >= 0; i--) {
-        if (kids[i]._tab)
-          gBrowser.removeTab(kids[i]._tab);
-        else
-          kids[i].remove();
-      }
-    });
-    const splitViewItem = mi("Add Split View", () => {
-      if (!state.contextTab)
-        return;
-      TabContextMenu.contextTab = state.contextTab;
-      TabContextMenu.contextTabs = [state.contextTab];
-      TabContextMenu.moveTabsToSplitView();
-    });
-    const reloadItem = mi("Reload Tab", () => {
-      if (state.contextTab)
-        gBrowser.reloadTab(state.contextTab);
-    });
-    const muteItem = mi("Mute Tab", () => {
-      if (state.contextTab)
-        state.contextTab.toggleMuteAudio();
-    });
-    const pinItem = mi("Pin Tab", () => {
-      if (!state.contextTab)
-        return;
-      if (state.contextTab.pinned)
-        gBrowser.unpinTab(state.contextTab);
-      else
-        gBrowser.pinTab(state.contextTab);
-    });
-    const duplicateItem = mi("Duplicate Tab", () => {
-      if (state.contextTab)
-        gBrowser.duplicateTab(state.contextTab);
-    });
-    const bookmarkItem = mi("Bookmark Tab", () => {
-      if (state.contextTab)
-        PlacesCommandHook.bookmarkTabs([state.contextTab]);
-    });
-    const moveToWindowItem = mi("Move to New Window", () => {
-      if (state.contextTab)
-        gBrowser.replaceTabWithWindow(state.contextTab);
-    });
-    const copyLinkItem = mi("Copy Link", () => {
-      if (!state.contextTab)
-        return;
-      const url = state.contextTab.linkedBrowser?.currentURI?.spec;
-      if (url) {
-        Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper).copyString(url);
-      }
-    });
-    const closeItem = mi("Close Tab", () => {
-      if (state.contextTab)
-        gBrowser.removeTab(state.contextTab);
-    });
-    const reopenItem = mi("Reopen Closed Tab", () => {
-      undoCloseTab();
-    });
-    menu.append(renameItem, collapseItem, createGroupItem, closeKidsItem, sep(), splitViewItem, reloadItem, muteItem, pinItem, duplicateItem, sep(), bookmarkItem, copyLinkItem, moveToWindowItem, sep(), closeItem, reopenItem);
-    menu.addEventListener("popupshowing", () => {
-      if (!state.contextTab)
-        return;
-      const row = rowOf.get(state.contextTab);
-      const has = row && hasChildren(row);
-      collapseItem.hidden = !has;
-      closeKidsItem.hidden = !has;
-      if (has) {
-        collapseItem.setAttribute("label", dataOf(row).collapsed ? "Expand" : "Collapse");
-      }
-      muteItem.setAttribute("label", state.contextTab.hasAttribute("muted") ? "Unmute Tab" : "Mute Tab");
-      pinItem.setAttribute("label", state.contextTab.pinned ? "Unpin Tab" : "Pin Tab");
-      splitViewItem.hidden = !!state.contextTab.splitview;
-    });
-    document.getElementById("mainPopupSet").appendChild(menu);
-  }
   function startRename(row) {
     if (!row)
       return;
@@ -2658,7 +2674,14 @@
     });
     if (!buildFromSaved())
       buildPanel();
-    setupContextMenu();
+    buildContextMenu({
+      startRename,
+      toggleCollapse,
+      createGroupRow,
+      setCursor,
+      updateVisibility,
+      scheduleSave
+    });
     createModeline();
     setupVimKeys();
     focusPanel();
