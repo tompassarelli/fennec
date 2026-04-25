@@ -50,6 +50,14 @@ chrome/
 ├── userChrome.css      Firefox entry point — only @imports palefox.css + user.css
 └── user.css            user customizations (NOT overwritten on update)
 
+docs/
+├── dev/                LOAD-BEARING for AI sessions — read this first
+│   ├── testing.md             tiered testing strategy + sprint checklist
+│   ├── compact-mode-dissertation.md   forensic analysis of the compact state machine
+│   └── chrome-reference/      dump-chrome-dom.js (Browser Console helper) + others
+├── *.md                user-facing documentation (install, keybindings, etc.)
+└── index.html, *.css   the palefox.tompassarelli.org website
+
 build.config.ts          entry list (src → .uc.js) with banners
 build.ts                 bun build wrapper
 ```
@@ -58,17 +66,40 @@ build.ts                 bun build wrapper
 yourself editing `.uc.js` directly, stop — edit the matching `src/` file and
 re-run `bun run build`.
 
+**`docs/dev/` is the source of truth for cross-session context.** When a
+plan, architectural rationale, or workflow extends beyond a single
+conversation, it goes in `docs/dev/<thing>.md` and gets pointed to from
+CLAUDE.md. Don't try to recover plans from chat — open that directory and
+read the relevant file end-to-end before starting work.
+
 ## Workflow
 
 ```bash
 bun run dev         # build + watch (Bun's --watch on the build script)
 bun run build       # one-shot production build
 bun run typecheck   # tsc --noEmit (do this before committing big edits)
+bun test            # pure-function unit tests (Tier 1 — see docs/dev/testing.md)
 ```
 
 `bun run dev` is the default loop. After edits, the `.uc.js` is rebuilt; reload
 Firefox to test. **Type errors do NOT fail the build** (`bun build` doesn't
 typecheck) — run `bun run typecheck` separately. Editor tsserver also runs.
+
+### Testing strategy
+
+Palefox's test infrastructure is being built in tiers. **Read
+[`docs/dev/testing.md`](docs/dev/testing.md) end-to-end before doing
+test-related work** — it's the source of truth for the plan, the sprint
+checklist, and the guiding principles. Quick orientation:
+
+- **Tier 1** (today): `bun test` for pure-function unit tests
+- **Tier 2** (next): `happy-dom`-backed mocks of chrome globals for state-machine tests
+- **Tier 3** (strategic): real Firefox via Marionette for end-to-end integration tests
+- **Tier 4** (after Tier 3): the autonomous AI iteration loop runs `bun run test:integration` instead of asking the user to reload Firefox
+
+The sprint checklist in `docs/dev/testing.md` is the single tracking source.
+Don't fork tracking into chat or commit messages — update the checklist as
+work lands.
 
 ### Dev feedback loop
 
@@ -99,10 +130,11 @@ The infra is already there:
 - Profile path on this machine: `~/.mozilla/firefox/tom/`. Read
   `palefox-debug.log` from there directly with the Read tool. (Confirm via
   `~/.mozilla/firefox/profiles.ini` if you doubt the path.)
-- `docs/chrome-reference/dump-chrome-dom.js` — paste into Browser Console
-  to dump the entire chrome DOM (with id/class/hidden/style/computed-style
-  hints) to `~/chrome-dom.txt`. Useful when you suspect stacking-context,
-  hidden-ancestor, or unknown-parent issues. You can read that file too.
+- `docs/dev/chrome-reference/dump-chrome-dom.js` — paste into Browser
+  Console to dump the entire chrome DOM (with id/class/hidden/style/
+  computed-style hints) to `~/chrome-dom.txt`. Useful when you suspect
+  stacking-context, hidden-ancestor, or unknown-parent issues. You can
+  read that file too.
 
 **When to ask the user to inspect anyway:** only if wiring the logging
 yourself is genuinely blocked — e.g., the element is in a shadow root you

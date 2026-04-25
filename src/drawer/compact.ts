@@ -11,7 +11,7 @@
 //
 // This eliminates race conditions: enabling compact just sets the attribute.
 // The element is immediately hidden because pfx-has-hover is absent. Showing
-// requires explicitly ADDING pfx-has-hover. See docs/compact-mode-dissertation.md
+// requires explicitly ADDING pfx-has-hover. See docs/dev/compact-mode-dissertation.md
 // for the full state-machine analysis comparing this to Zen and Firefox native.
 //
 // Public API (CompactAPI): toggle(), reconcile()/reconcileHorizontal(),
