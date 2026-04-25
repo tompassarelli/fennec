@@ -33,6 +33,8 @@ export type ContentFocusAPI = {
    *  False otherwise — including when content has focus on body / a button /
    *  a link / nothing at all. */
   contentInputFocused(): boolean;
+  /** Test/debug introspection — exposed via pfxTest.contentFocusDiag(). */
+  diag(): { messageCount: number; lastMessageEditable: boolean | null; cachedForCurrent: boolean | undefined };
   /** Tear down message listeners + frame script. Called from window.unload. */
   destroy(): void;
 };
@@ -41,22 +43,33 @@ export type ContentFocusAPI = {
 // FRAME SCRIPT (runs in every content frame)
 // =============================================================================
 
-// IIFE serialized into a data: URL. Matches Vimium's isSelectable/isEditable
-// almost line-for-line, plus the deep-active-element walk that handles
-// shadow DOM (mode_insert.js::getActiveElement). Reports state on every
-// focusin/focusout/click/pagehide so chrome's cache stays current as the
-// user tabs through inputs, focuses & blurs, navigates, etc.
+// IIFE serialized into a data: URL.
+//
+// Frame-script global DOES inherit from EventTarget — verified against
+// dom/chrome-webidl/MessageManager.webidl:434 (`ContentFrameMessageManager :
+// EventTarget`). Listeners attached via the global `addEventListener` capture
+// content events from EVERY content window loaded into this frame loader, so
+// the listener survives navigation (which `content.addEventListener` does
+// NOT — `content` is a moving reference).
+//
+// `Element` and `document` are NOT global. Don't use `instanceof Element`;
+// duck-type via `.nodeName` instead. Always go through `content.document`.
+//
+// isSelectable/isEditable port directly from Vimium's lib/dom_utils.js
+// (isFocusable + isSelectable + isEditable). Shadow-root traversal mirrors
+// content_scripts/mode_insert.js::getActiveElement. ARIA roles textbox /
+// searchbox / application cover Tridactyl's Google Docs / Sheets case
+// (src/lib/dom.ts::isTextEditable).
 const FRAME_SCRIPT_SRC = `
 "use strict";
 (function() {
-  // --- editability check (mirrors Vimium lib/dom_utils.js) ---
   const UNSELECTABLE_INPUT_TYPES = new Set([
     "button","checkbox","color","file","hidden","image","radio","reset","submit"
   ]);
 
   function isSelectable(el) {
-    if (!(el instanceof Element)) return false;
-    const tag = el.nodeName ? el.nodeName.toLowerCase() : "";
+    if (!el || typeof el.nodeName !== "string") return false;
+    const tag = el.nodeName.toLowerCase();
     if (tag === "input") return !UNSELECTABLE_INPUT_TYPES.has((el.type || "").toLowerCase());
     if (tag === "textarea") return true;
     if (el.isContentEditable) return true;
@@ -65,18 +78,15 @@ const FRAME_SCRIPT_SRC = `
 
   function isEditable(el) {
     if (isSelectable(el)) return true;
-    if (!(el instanceof Element)) return false;
-    const tag = el.nodeName ? el.nodeName.toLowerCase() : "";
-    if (tag === "select") return true;
-    // ARIA: role=textbox is a custom-rolled input field, role=application means
-    // the element manages its own keyboard (Google Docs, sheets, etc.).
-    const role = el.getAttribute && el.getAttribute("role");
+    if (!el || typeof el.nodeName !== "string") return false;
+    if (el.nodeName.toLowerCase() === "select") return true;
+    const role = (typeof el.getAttribute === "function") ? el.getAttribute("role") : null;
     if (role === "textbox" || role === "searchbox" || role === "application") return true;
     return false;
   }
 
-  // Walk shadow roots (Vimium content_scripts/mode_insert.js::getActiveElement).
   function deepActiveElement() {
+    if (!content || !content.document) return null;
     let a = content.document.activeElement;
     while (a && a.shadowRoot && a.shadowRoot.activeElement) {
       a = a.shadowRoot.activeElement;
@@ -86,22 +96,35 @@ const FRAME_SCRIPT_SRC = `
 
   let lastReported = null;
   function report() {
-    const editable = isEditable(deepActiveElement());
-    if (editable === lastReported) return;
-    lastReported = editable;
-    sendAsyncMessage("Palefox:FocusState", { editable });
+    try {
+      const editable = isEditable(deepActiveElement());
+      if (editable === lastReported) return;
+      lastReported = editable;
+      sendAsyncMessage("Palefox:FocusState", { editable: editable });
+    } catch (_) {}
   }
 
+  // Capture phase + global addEventListener (which targets the message
+  // manager's EventTarget, downstream of all content windows in this frame
+  // loader — see WebIDL above). Survives navigation between pages.
   addEventListener("focusin",  report, true);
   addEventListener("focusout", report, true);
   addEventListener("click",    report, true);
-  addEventListener("DOMContentLoaded", report, true);
-  addEventListener("pagehide", () => {
+  addEventListener("DOMContentLoaded", function () {
+    lastReported = null;
+    report();
+  }, true);
+  addEventListener("pagehide", function () {
+    if (lastReported === false) return;
     lastReported = false;
-    sendAsyncMessage("Palefox:FocusState", { editable: false });
+    try { sendAsyncMessage("Palefox:FocusState", { editable: false }); } catch (_) {}
   }, true);
 
-  // Initial report on script load.
+  addMessageListener("Palefox:FocusProbe", function () {
+    lastReported = null;
+    report();
+  });
+
   report();
 })();
 `;
@@ -117,40 +140,46 @@ export function makeContentFocus(): ContentFocusAPI {
 
   const dataUrl = "data:application/javascript;charset=utf-8," + encodeURIComponent(FRAME_SCRIPT_SRC);
 
-  // gBrowser.messageManager broadcasts to all <browser> frame loaders in this
-  // chrome window AND auto-attaches to newly-opened tabs (allowDelayedLoad=true).
-  const mm = (gBrowser as { messageManager?: any }).messageManager;
+  // window.messageManager is the chrome window's group manager — broadcasts
+  // to every <browser> frame loader in this window AND queues for new ones
+  // when allowDelayedLoad=true. (gBrowser.messageManager is technically the
+  // same object on tabbrowser, but window.messageManager is the documented
+  // entry point.)
+  const mm = (window as unknown as { messageManager?: any }).messageManager
+    ?? (gBrowser as { messageManager?: any }).messageManager;
   if (!mm) {
     log("init:no-message-manager");
     return {
       contentInputFocused: () => false,
+      diag: () => ({ messageCount: 0, lastMessageEditable: null, cachedForCurrent: undefined }),
       destroy: () => {},
     };
   }
 
+  let messageCount = 0;
+  let lastMessageEditable: boolean | null = null;
   function onFocusState(msg: { target: Element; data: { editable: boolean } }): void {
+    messageCount++;
+    lastMessageEditable = !!msg.data.editable;
     editablePerBrowser.set(msg.target, !!msg.data.editable);
+    log("focusState:received", { editable: msg.data.editable, count: messageCount });
   }
 
-  mm.loadFrameScript(dataUrl, /* allowDelayedLoad */ true);
   mm.addMessageListener("Palefox:FocusState", onFocusState);
+  mm.loadFrameScript(dataUrl, /* allowDelayedLoad */ true);
   log("init", { dataUrlSize: dataUrl.length });
 
-  // When the user switches tabs, the cached state for the newly-selected
-  // browser is used immediately (no message needed). Just for safety,
-  // ask the new tab's frame script to re-report after switch — covers the
-  // race where the script hasn't loaded yet for a brand-new tab.
+  // On tab switch, ask the newly-selected tab's frame script to re-report.
+  // Without this, a tab that hasn't yet emitted a focus event keeps the
+  // cache empty (treated as "not editable"). The frame script handles
+  // "Palefox:FocusProbe" by busting its dedupe and re-running report().
   function onTabSelect(): void {
     try {
-      const browser = gBrowser.selectedBrowser as { messageManager?: any };
-      // sendAsyncMessage to a single browser's frame script asking it to re-report.
-      // We don't define a "Palefox:Probe" handler in the frame script (avoid
-      // bloat); instead, the cache value just stays whatever the last report
-      // was. If user opens a new tab, default is "not editable" until the
-      // first focusin fires there.
-      // (Kept here as a hook in case we add probe later.)
-      void browser;
-    } catch {}
+      const browser = (gBrowser as { selectedBrowser?: { messageManager?: any } }).selectedBrowser;
+      browser?.messageManager?.sendAsyncMessage("Palefox:FocusProbe");
+    } catch (e) {
+      log("probe:error", { msg: String(e) });
+    }
   }
   gBrowser.tabContainer?.addEventListener("TabSelect", onTabSelect);
 
@@ -174,5 +203,14 @@ export function makeContentFocus(): ContentFocusAPI {
     gBrowser.tabContainer?.removeEventListener("TabSelect", onTabSelect);
   }
 
-  return { contentInputFocused, destroy };
+  function diag() {
+    let cachedForCurrent: boolean | undefined;
+    try {
+      const browser = (gBrowser as { selectedBrowser?: Element }).selectedBrowser;
+      if (browser) cachedForCurrent = editablePerBrowser.get(browser);
+    } catch {}
+    return { messageCount, lastMessageEditable, cachedForCurrent };
+  }
+
+  return { contentInputFocused, diag, destroy };
 }

@@ -4211,14 +4211,13 @@
   var FRAME_SCRIPT_SRC = `
 "use strict";
 (function() {
-  // --- editability check (mirrors Vimium lib/dom_utils.js) ---
   const UNSELECTABLE_INPUT_TYPES = new Set([
     "button","checkbox","color","file","hidden","image","radio","reset","submit"
   ]);
 
   function isSelectable(el) {
-    if (!(el instanceof Element)) return false;
-    const tag = el.nodeName ? el.nodeName.toLowerCase() : "";
+    if (!el || typeof el.nodeName !== "string") return false;
+    const tag = el.nodeName.toLowerCase();
     if (tag === "input") return !UNSELECTABLE_INPUT_TYPES.has((el.type || "").toLowerCase());
     if (tag === "textarea") return true;
     if (el.isContentEditable) return true;
@@ -4227,18 +4226,15 @@
 
   function isEditable(el) {
     if (isSelectable(el)) return true;
-    if (!(el instanceof Element)) return false;
-    const tag = el.nodeName ? el.nodeName.toLowerCase() : "";
-    if (tag === "select") return true;
-    // ARIA: role=textbox is a custom-rolled input field, role=application means
-    // the element manages its own keyboard (Google Docs, sheets, etc.).
-    const role = el.getAttribute && el.getAttribute("role");
+    if (!el || typeof el.nodeName !== "string") return false;
+    if (el.nodeName.toLowerCase() === "select") return true;
+    const role = (typeof el.getAttribute === "function") ? el.getAttribute("role") : null;
     if (role === "textbox" || role === "searchbox" || role === "application") return true;
     return false;
   }
 
-  // Walk shadow roots (Vimium content_scripts/mode_insert.js::getActiveElement).
   function deepActiveElement() {
+    if (!content || !content.document) return null;
     let a = content.document.activeElement;
     while (a && a.shadowRoot && a.shadowRoot.activeElement) {
       a = a.shadowRoot.activeElement;
@@ -4248,22 +4244,35 @@
 
   let lastReported = null;
   function report() {
-    const editable = isEditable(deepActiveElement());
-    if (editable === lastReported) return;
-    lastReported = editable;
-    sendAsyncMessage("Palefox:FocusState", { editable });
+    try {
+      const editable = isEditable(deepActiveElement());
+      if (editable === lastReported) return;
+      lastReported = editable;
+      sendAsyncMessage("Palefox:FocusState", { editable: editable });
+    } catch (_) {}
   }
 
+  // Capture phase + global addEventListener (which targets the message
+  // manager's EventTarget, downstream of all content windows in this frame
+  // loader — see WebIDL above). Survives navigation between pages.
   addEventListener("focusin",  report, true);
   addEventListener("focusout", report, true);
   addEventListener("click",    report, true);
-  addEventListener("DOMContentLoaded", report, true);
-  addEventListener("pagehide", () => {
+  addEventListener("DOMContentLoaded", function () {
+    lastReported = null;
+    report();
+  }, true);
+  addEventListener("pagehide", function () {
+    if (lastReported === false) return;
     lastReported = false;
-    sendAsyncMessage("Palefox:FocusState", { editable: false });
+    try { sendAsyncMessage("Palefox:FocusState", { editable: false }); } catch (_) {}
   }, true);
 
-  // Initial report on script load.
+  addMessageListener("Palefox:FocusProbe", function () {
+    lastReported = null;
+    report();
+  });
+
   report();
 })();
 `;
@@ -4271,24 +4280,33 @@
     const log8 = createLogger("contentFocus");
     const editablePerBrowser = new WeakMap;
     const dataUrl = "data:application/javascript;charset=utf-8," + encodeURIComponent(FRAME_SCRIPT_SRC);
-    const mm = gBrowser.messageManager;
+    const mm = window.messageManager ?? gBrowser.messageManager;
     if (!mm) {
       log8("init:no-message-manager");
       return {
         contentInputFocused: () => false,
+        diag: () => ({ messageCount: 0, lastMessageEditable: null, cachedForCurrent: undefined }),
         destroy: () => {}
       };
     }
+    let messageCount = 0;
+    let lastMessageEditable = null;
     function onFocusState(msg) {
+      messageCount++;
+      lastMessageEditable = !!msg.data.editable;
       editablePerBrowser.set(msg.target, !!msg.data.editable);
+      log8("focusState:received", { editable: msg.data.editable, count: messageCount });
     }
-    mm.loadFrameScript(dataUrl, true);
     mm.addMessageListener("Palefox:FocusState", onFocusState);
+    mm.loadFrameScript(dataUrl, true);
     log8("init", { dataUrlSize: dataUrl.length });
     function onTabSelect() {
       try {
         const browser = gBrowser.selectedBrowser;
-      } catch {}
+        browser?.messageManager?.sendAsyncMessage("Palefox:FocusProbe");
+      } catch (e) {
+        log8("probe:error", { msg: String(e) });
+      }
     }
     gBrowser.tabContainer?.addEventListener("TabSelect", onTabSelect);
     function contentInputFocused() {
@@ -4310,7 +4328,16 @@
       }
       gBrowser.tabContainer?.removeEventListener("TabSelect", onTabSelect);
     }
-    return { contentInputFocused, destroy };
+    function diag() {
+      let cachedForCurrent;
+      try {
+        const browser = gBrowser.selectedBrowser;
+        if (browser)
+          cachedForCurrent = editablePerBrowser.get(browser);
+      } catch {}
+      return { messageCount, lastMessageEditable, cachedForCurrent };
+    }
+    return { contentInputFocused, diag, destroy };
   }
 
   // src/tabs/index.ts
@@ -4640,7 +4667,14 @@
         vim,
         rows: Rows,
         scheduleSave,
-        history
+        history,
+        contentFocus,
+        contentInputFocused() {
+          return contentFocus.contentInputFocused();
+        },
+        contentFocusDiag() {
+          return contentFocus.diag();
+        }
       };
       console.log("palefox-tabs: pfxTest debug API exposed");
     }

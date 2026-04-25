@@ -470,6 +470,10 @@ const pfxLog = createLogger("tabs");
         rows: Rows,
         scheduleSave,
         history,
+        contentFocus,
+        // Bridge probe — true iff content reports an editable focused element.
+        contentInputFocused() { return contentFocus.contentInputFocused(); },
+        contentFocusDiag() { return contentFocus.diag(); },
       };
       console.log("palefox-tabs: pfxTest debug API exposed");
     }
