@@ -4,12 +4,16 @@
 
 A developer-focused alternative to Zen Browser on upstream Firefox
 
+</div>
+
+> [!IMPORTANT]
+> Palefox is in beta. Suitable for daily driving but expect rough edges as features land.
+
+<div align="center">
+
 <img src="docs/demo.gif" alt="Palefox demo" />
 
 </div>
-
-
-> **Palefox is in beta.** Stable enough for daily use. Features are actively evolving.
 
 ## Features
 
