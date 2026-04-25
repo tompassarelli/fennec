@@ -2096,10 +2096,305 @@
     };
   }
 
+  // src/tabs/picker.ts
+  function makePicker(deps) {
+    let pickerEl = null;
+    let pickerInput = null;
+    let pickerList = null;
+    let active = false;
+    let items = [];
+    let filtered = [];
+    let selectedIdx = 0;
+    let onSelect = null;
+    let actions = [];
+    let preserveTree = false;
+    function ensureBuilt() {
+      if (pickerEl)
+        return;
+      const xul = (tag) => document.createXULElement(tag);
+      const root = xul("vbox");
+      root.id = "pfx-picker";
+      root.hidden = true;
+      root.setAttribute("aria-modal", "true");
+      const inputBox = xul("hbox");
+      inputBox.className = "pfx-picker-input-box";
+      const prompt = xul("label");
+      prompt.className = "pfx-picker-prompt";
+      prompt.setAttribute("value", "›");
+      const input = document.createElement("input");
+      input.className = "pfx-picker-input";
+      input.placeholder = "Filter…";
+      inputBox.append(prompt, input);
+      const list = xul("vbox");
+      list.className = "pfx-picker-list";
+      root.append(inputBox, list);
+      document.documentElement.appendChild(root);
+      pickerEl = root;
+      pickerInput = input;
+      pickerList = list;
+      input.addEventListener("input", () => {
+        const q = input.value.trim().toLowerCase();
+        filtered = computeFiltered(items, q);
+        selectedIdx = 0;
+        renderList();
+      });
+      input.addEventListener("keydown", (e) => {
+        if (!active)
+          return;
+        switch (e.key) {
+          case "Escape":
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            dismiss();
+            return;
+          case "Enter":
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            commit();
+            return;
+          case "Tab":
+            if (actions.length > 0) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              openActionMenu();
+              return;
+            }
+            break;
+          case "ArrowDown":
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            moveSelection(1);
+            return;
+          case "ArrowUp":
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            moveSelection(-1);
+            return;
+          case "j":
+            if (e.ctrlKey) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              moveSelection(1);
+              return;
+            }
+            break;
+          case "k":
+            if (e.ctrlKey) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              moveSelection(-1);
+              return;
+            }
+            break;
+          case "n":
+            if (e.ctrlKey) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              moveSelection(1);
+              return;
+            }
+            break;
+          case "p":
+            if (e.ctrlKey) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              moveSelection(-1);
+              return;
+            }
+            break;
+        }
+      }, true);
+    }
+    function computeFiltered(allItems, q) {
+      if (!q)
+        return [...allItems];
+      const matchedSet = new Set;
+      for (const it of allItems) {
+        const hay = ((it.display ?? "") + " " + (it.secondary ?? "")).toLowerCase();
+        if (hay.includes(q))
+          matchedSet.add(it);
+      }
+      if (!preserveTree) {
+        return allItems.filter((it) => matchedSet.has(it));
+      }
+      const byId = new Map;
+      for (const it of allItems) {
+        if (it.id != null)
+          byId.set(it.id, it);
+      }
+      const visible = new Set(matchedSet);
+      for (const m of matchedSet) {
+        let cur = m;
+        while (cur && cur.parentId != null) {
+          const p = byId.get(cur.parentId);
+          if (!p || visible.has(p))
+            break;
+          visible.add(p);
+          cur = p;
+        }
+      }
+      return allItems.filter((it) => visible.has(it));
+    }
+    function isDirectMatch(item, q) {
+      if (!q)
+        return true;
+      const hay = ((item.display ?? "") + " " + (item.secondary ?? "")).toLowerCase();
+      return hay.includes(q);
+    }
+    function renderList() {
+      if (!pickerList)
+        return;
+      while (pickerList.firstChild)
+        pickerList.firstChild.remove();
+      if (!filtered.length) {
+        const empty = document.createXULElement("label");
+        empty.className = "pfx-picker-empty";
+        empty.setAttribute("value", "(no matches)");
+        pickerList.appendChild(empty);
+        return;
+      }
+      const q = pickerInput?.value?.trim().toLowerCase() ?? "";
+      filtered.forEach((item, idx) => {
+        const row = document.createXULElement("hbox");
+        row.className = "pfx-picker-row";
+        if (idx === selectedIdx)
+          row.setAttribute("pfx-picker-selected", "true");
+        if (preserveTree && q && !isDirectMatch(item, q)) {
+          row.setAttribute("pfx-picker-context", "true");
+        }
+        if (item.depth) {
+          row.style.setProperty("padding-left", `${14 + item.depth * 14}px`, "important");
+        }
+        if (item.icon) {
+          if (/^https?:|^data:|^chrome:|^moz-/.test(item.icon)) {
+            const img = document.createElement("img");
+            img.className = "pfx-picker-icon";
+            img.src = item.icon;
+            img.alt = "";
+            row.appendChild(img);
+          } else {
+            const ic = document.createXULElement("label");
+            ic.className = "pfx-picker-icon-text";
+            ic.setAttribute("value", item.icon);
+            row.appendChild(ic);
+          }
+        }
+        const text = document.createXULElement("hbox");
+        text.className = "pfx-picker-text";
+        text.setAttribute("flex", "1");
+        const primary = document.createXULElement("label");
+        primary.className = "pfx-picker-label";
+        primary.setAttribute("value", item.display);
+        primary.setAttribute("crop", "end");
+        text.appendChild(primary);
+        if (item.secondary) {
+          const sec = document.createXULElement("label");
+          sec.className = "pfx-picker-secondary";
+          sec.setAttribute("value", item.secondary);
+          sec.setAttribute("crop", "end");
+          text.appendChild(sec);
+        }
+        row.appendChild(text);
+        row.addEventListener("click", () => {
+          selectedIdx = idx;
+          commit();
+        });
+        pickerList.appendChild(row);
+      });
+      const selected = pickerList.querySelector("[pfx-picker-selected='true']");
+      selected?.scrollIntoView({ block: "nearest" });
+    }
+    function openActionMenu() {
+      const target = filtered[selectedIdx];
+      const localActions = actions;
+      if (!target || !localActions.length)
+        return;
+      dismiss();
+      show({
+        prompt: `actions ›`,
+        items: localActions.map((a) => ({
+          display: a.label + (a.key ? `   (${a.key})` : ""),
+          data: a
+        })),
+        onSelect: (chosen) => {
+          const action = chosen.data;
+          try {
+            action.run(target);
+          } catch (e) {
+            deps.modelineMsg(`action failed: ${e.message}`, 4000);
+          }
+        }
+      });
+    }
+    function moveSelection(delta) {
+      if (!filtered.length)
+        return;
+      selectedIdx = (selectedIdx + delta + filtered.length) % filtered.length;
+      renderList();
+    }
+    function commit() {
+      const item = filtered[selectedIdx];
+      const cb = onSelect;
+      dismiss();
+      if (item && cb)
+        cb(item);
+    }
+    function dismiss() {
+      if (!active)
+        return;
+      active = false;
+      onSelect = null;
+      actions = [];
+      preserveTree = false;
+      if (pickerEl)
+        pickerEl.hidden = true;
+      deps.restoreFocus();
+    }
+    function show(opts) {
+      ensureBuilt();
+      if (!pickerEl || !pickerInput || !pickerList)
+        return;
+      items = opts.items;
+      selectedIdx = 0;
+      onSelect = opts.onSelect;
+      actions = opts.actions ?? [];
+      preserveTree = !!opts.preserveTree;
+      filtered = [...opts.items];
+      active = true;
+      const promptEl = pickerEl.querySelector(".pfx-picker-prompt");
+      if (promptEl && opts.prompt) {
+        promptEl.setAttribute("value", opts.prompt);
+      } else if (promptEl) {
+        promptEl.setAttribute("value", "›");
+      }
+      pickerInput.value = "";
+      renderList();
+      pickerEl.hidden = false;
+      pickerInput.focus();
+    }
+    function destroy() {
+      dismiss();
+      pickerEl?.remove();
+      pickerEl = null;
+      pickerInput = null;
+      pickerList = null;
+    }
+    return {
+      show,
+      isActive: () => active,
+      dismiss,
+      destroy
+    };
+  }
+
   // src/tabs/vim.ts
   var log6 = createLogger("tabs/vim");
   function makeVim(deps) {
     const { rows, layout, scheduleSave, clearSelection, selectRange, sidebarMain, history, contentFocus } = deps;
+    const picker = makePicker({
+      restoreFocus: () => state.panel?.focus(),
+      modelineMsg: (text, durationMs) => modelineMsg(text, durationMs)
+    });
     let chord = null;
     let chordTimer = 0;
     let pendingCtrlW = false;
@@ -2487,7 +2782,7 @@
         modelineMsg("No tabs", 3000);
         return;
       }
-      showPicker({
+      picker.show({
         prompt: "tabs ›",
         items,
         preserveTree: true,
@@ -2597,7 +2892,7 @@
         }
       });
       document.addEventListener("keydown", (e) => {
-        if (pickerActive)
+        if (picker.isActive())
           return;
         if (contentFocus.contentInputFocused())
           return;
@@ -2661,7 +2956,7 @@
     function setupVimKeys() {
       state.panel.setAttribute("tabindex", "0");
       document.addEventListener("keydown", (e) => {
-        if (pickerActive)
+        if (picker.isActive())
           return;
         if (!panelActive)
           return;
@@ -2697,277 +2992,6 @@
         if (panelActive)
           blurPanel();
       });
-    }
-    let pickerEl = null;
-    let pickerInput = null;
-    let pickerList = null;
-    let pickerActive = false;
-    let pickerItems = [];
-    let pickerFiltered = [];
-    let pickerSelectedIdx = 0;
-    let pickerOnSelect = null;
-    let pickerActions = [];
-    let pickerPreserveTree = false;
-    function ensurePickerBuilt() {
-      if (pickerEl)
-        return;
-      pickerEl = document.createXULElement("vbox");
-      pickerEl.id = "pfx-picker";
-      pickerEl.hidden = true;
-      pickerEl.setAttribute("aria-modal", "true");
-      const inputBox = document.createXULElement("hbox");
-      inputBox.className = "pfx-picker-input-box";
-      const prompt = document.createXULElement("label");
-      prompt.className = "pfx-picker-prompt";
-      prompt.setAttribute("value", "›");
-      pickerInput = document.createElement("input");
-      pickerInput.className = "pfx-picker-input";
-      pickerInput.placeholder = "Filter…";
-      inputBox.append(prompt, pickerInput);
-      pickerList = document.createXULElement("vbox");
-      pickerList.className = "pfx-picker-list";
-      pickerEl.append(inputBox, pickerList);
-      document.documentElement.appendChild(pickerEl);
-      pickerInput.addEventListener("input", () => {
-        const q = pickerInput.value.trim().toLowerCase();
-        pickerFiltered = computeFiltered(pickerItems, q);
-        pickerSelectedIdx = 0;
-        renderPickerList();
-      });
-      pickerInput.addEventListener("keydown", (e) => {
-        if (!pickerActive)
-          return;
-        switch (e.key) {
-          case "Escape":
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            dismissPicker();
-            return;
-          case "Enter":
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            commitPicker();
-            return;
-          case "Tab":
-            if (pickerActions.length > 0) {
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              openActionMenu();
-              return;
-            }
-            break;
-          case "ArrowDown":
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            movePickerSelection(1);
-            return;
-          case "ArrowUp":
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            movePickerSelection(-1);
-            return;
-          case "j":
-            if (e.ctrlKey) {
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              movePickerSelection(1);
-              return;
-            }
-            break;
-          case "k":
-            if (e.ctrlKey) {
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              movePickerSelection(-1);
-              return;
-            }
-            break;
-          case "n":
-            if (e.ctrlKey) {
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              movePickerSelection(1);
-              return;
-            }
-            break;
-          case "p":
-            if (e.ctrlKey) {
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              movePickerSelection(-1);
-              return;
-            }
-            break;
-        }
-      }, true);
-    }
-    function computeFiltered(items, q) {
-      if (!q)
-        return [...items];
-      const matchedSet = new Set;
-      for (const it of items) {
-        const hay = ((it.display ?? "") + " " + (it.secondary ?? "")).toLowerCase();
-        if (hay.includes(q))
-          matchedSet.add(it);
-      }
-      if (!pickerPreserveTree) {
-        return items.filter((it) => matchedSet.has(it));
-      }
-      const byId = new Map;
-      for (const it of items) {
-        if (it.id != null)
-          byId.set(it.id, it);
-      }
-      const visible = new Set(matchedSet);
-      for (const m of matchedSet) {
-        let cur = m;
-        while (cur && cur.parentId != null) {
-          const p = byId.get(cur.parentId);
-          if (!p || visible.has(p))
-            break;
-          visible.add(p);
-          cur = p;
-        }
-      }
-      return items.filter((it) => visible.has(it));
-    }
-    function isDirectMatch(item, q) {
-      if (!q)
-        return true;
-      const hay = ((item.display ?? "") + " " + (item.secondary ?? "")).toLowerCase();
-      return hay.includes(q);
-    }
-    function renderPickerList() {
-      if (!pickerList)
-        return;
-      while (pickerList.firstChild)
-        pickerList.firstChild.remove();
-      if (!pickerFiltered.length) {
-        const empty = document.createXULElement("label");
-        empty.className = "pfx-picker-empty";
-        empty.setAttribute("value", "(no matches)");
-        pickerList.appendChild(empty);
-        return;
-      }
-      const q = pickerInput?.value?.trim().toLowerCase() ?? "";
-      pickerFiltered.forEach((item, idx) => {
-        const row = document.createXULElement("hbox");
-        row.className = "pfx-picker-row";
-        if (idx === pickerSelectedIdx)
-          row.setAttribute("pfx-picker-selected", "true");
-        if (pickerPreserveTree && q && !isDirectMatch(item, q)) {
-          row.setAttribute("pfx-picker-context", "true");
-        }
-        if (item.depth) {
-          row.style.setProperty("padding-left", `${14 + item.depth * 14}px`, "important");
-        }
-        if (item.icon) {
-          if (/^https?:|^data:|^chrome:|^moz-/.test(item.icon)) {
-            const img = document.createElement("img");
-            img.className = "pfx-picker-icon";
-            img.src = item.icon;
-            img.alt = "";
-            row.appendChild(img);
-          } else {
-            const ic = document.createXULElement("label");
-            ic.className = "pfx-picker-icon-text";
-            ic.setAttribute("value", item.icon);
-            row.appendChild(ic);
-          }
-        }
-        const text = document.createXULElement("hbox");
-        text.className = "pfx-picker-text";
-        text.setAttribute("flex", "1");
-        const primary = document.createXULElement("label");
-        primary.className = "pfx-picker-label";
-        primary.setAttribute("value", item.display);
-        primary.setAttribute("crop", "end");
-        text.appendChild(primary);
-        if (item.secondary) {
-          const sec = document.createXULElement("label");
-          sec.className = "pfx-picker-secondary";
-          sec.setAttribute("value", item.secondary);
-          sec.setAttribute("crop", "end");
-          text.appendChild(sec);
-        }
-        row.appendChild(text);
-        row.addEventListener("click", () => {
-          pickerSelectedIdx = idx;
-          commitPicker();
-        });
-        pickerList.appendChild(row);
-      });
-      const selected = pickerList.querySelector("[pfx-picker-selected='true']");
-      selected?.scrollIntoView({ block: "nearest" });
-    }
-    function openActionMenu() {
-      const target = pickerFiltered[pickerSelectedIdx];
-      const actions = pickerActions;
-      if (!target || !actions.length)
-        return;
-      dismissPicker();
-      showPicker({
-        prompt: `actions ›`,
-        items: actions.map((a) => ({
-          display: a.label + (a.key ? `   (${a.key})` : ""),
-          data: a
-        })),
-        onSelect: (chosen) => {
-          const action = chosen.data;
-          try {
-            action.run(target);
-          } catch (e) {
-            modelineMsg(`action failed: ${e.message}`, 4000);
-          }
-        }
-      });
-    }
-    function movePickerSelection(delta) {
-      if (!pickerFiltered.length)
-        return;
-      pickerSelectedIdx = (pickerSelectedIdx + delta + pickerFiltered.length) % pickerFiltered.length;
-      renderPickerList();
-    }
-    function commitPicker() {
-      const item = pickerFiltered[pickerSelectedIdx];
-      const cb = pickerOnSelect;
-      dismissPicker();
-      if (item && cb)
-        cb(item);
-    }
-    function dismissPicker() {
-      if (!pickerActive)
-        return;
-      pickerActive = false;
-      pickerOnSelect = null;
-      pickerActions = [];
-      pickerPreserveTree = false;
-      if (pickerEl)
-        pickerEl.hidden = true;
-      if (state.panel)
-        state.panel.focus();
-    }
-    function showPicker(opts) {
-      ensurePickerBuilt();
-      if (!pickerEl || !pickerInput || !pickerList)
-        return;
-      pickerItems = opts.items;
-      pickerSelectedIdx = 0;
-      pickerOnSelect = opts.onSelect;
-      pickerActions = opts.actions ?? [];
-      pickerPreserveTree = !!opts.preserveTree;
-      pickerFiltered = [...opts.items];
-      pickerActive = true;
-      const promptEl = pickerEl.querySelector(".pfx-picker-prompt");
-      if (promptEl && opts.prompt) {
-        promptEl.setAttribute("value", opts.prompt);
-      } else if (promptEl) {
-        promptEl.setAttribute("value", "›");
-      }
-      pickerInput.value = "";
-      renderPickerList();
-      pickerEl.hidden = false;
-      pickerInput.focus();
     }
     function focusContent() {
       gBrowser.selectedBrowser.focus();
@@ -3449,7 +3473,7 @@
                 return;
               }
               if (!arg) {
-                showPicker({
+                picker.show({
                   prompt: "restore ›",
                   items: tagged.map((e) => ({ display: summarizeEvent(e), data: e })),
                   onSelect: async (item) => {
@@ -3488,7 +3512,7 @@
                 modelineMsg(q ? `No sessions match "${q}"` : "No sessions yet", 3000);
                 return;
               }
-              showPicker({
+              picker.show({
                 prompt: "sessions ›",
                 items: evs.map((e) => ({ display: summarizeEvent(e), data: e })),
                 onSelect: async (item) => {
@@ -3553,7 +3577,7 @@
                 modelineMsg(q ? `No events match "${q}"` : "No history yet", 3000);
                 return;
               }
-              showPicker({
+              picker.show({
                 prompt: "history ›",
                 items: evs.map((e) => ({ display: summarizeEvent(e), data: e })),
                 onSelect: async (item) => {

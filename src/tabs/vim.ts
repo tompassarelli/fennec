@@ -29,6 +29,7 @@ import { hzDisplay, rowOf, savedTabQueue, selection, state, treeOf } from "./sta
 import type { Row, Tab } from "./types.ts";
 import type { LayoutAPI } from "./layout.ts";
 import type { RowsAPI } from "./rows.ts";
+import { makePicker, type PickerItem, type PickerAction } from "./picker.ts";
 
 declare const document: Document;
 declare const gBrowser: any;
@@ -103,6 +104,18 @@ export type VimAPI = {
 
 export function makeVim(deps: VimDeps): VimAPI {
   const { rows, layout, scheduleSave, clearSelection, selectRange, sidebarMain, history, contentFocus } = deps;
+
+  // ---------- spotlight picker ---------------------------------------------
+  // Self-contained UI primitive — see src/tabs/picker.ts. We pass two
+  // callbacks: focus restoration (back to the vim panel after dismiss)
+  // and modelineMsg for action-failure messages. modelineMsg is a function
+  // declaration so its hoisted binding is in scope here even though its
+  // body appears below.
+
+  const picker = makePicker({
+    restoreFocus: () => state.panel?.focus(),
+    modelineMsg: (text, durationMs) => modelineMsg(text, durationMs),
+  });
 
   // ---------- private state -------------------------------------------------
 
@@ -559,7 +572,7 @@ export function makeVim(deps: VimDeps): VimAPI {
       modelineMsg("No tabs", 3000);
       return;
     }
-    showPicker({
+    picker.show({
       prompt: "tabs ›",
       items,
       preserveTree: true,
@@ -672,7 +685,7 @@ export function makeVim(deps: VimDeps): VimAPI {
 
     document.addEventListener("keydown", (e) => {
       // Picker has its own input, don't compete.
-      if (pickerActive) return;
+      if (picker.isActive()) return;
       // Content's focused element is editable (input / textarea /
       // contentEditable / role=textbox|application). Bail. State comes
       // from the content_focus.ts frame script — same isEditable logic
@@ -742,10 +755,10 @@ export function makeVim(deps: VimDeps): VimAPI {
 
     document.addEventListener("keydown", (e) => {
       // Picker takes precedence over everything else when it's up.
-      // Its own keydown handler in showPicker() runs in capture phase,
-      // so by the time we get here the picker has already consumed
-      // anything it cares about. Just bail.
-      if (pickerActive) return;
+      // The picker (src/tabs/picker.ts) has its own keydown listener in
+      // capture phase, so by the time we get here the picker has already
+      // consumed anything it cares about. Just bail.
+      if (picker.isActive()) return;
 
       if (!panelActive) return;
 
@@ -794,387 +807,6 @@ export function makeVim(deps: VimDeps): VimAPI {
     });
   }
 
-  // ---------- Picker (fzf-style overlay) ------------------------------------
-  //
-  // Rich list UI for `:history`, `:sessions`, `:restore` (bare). Built as a
-  // chrome-document overlay (positioned fixed bottom). Type-to-filter,
-  // arrow keys / j/k to navigate, Enter to select, Esc to dismiss.
-  //
-  // We keep the modeline for short toasts and ex-input. The picker is the
-  // place for browsing data — emacs-style minibuffer + completion buffer
-  // in one panel.
-
-  interface PickerItem {
-    /** Primary text. Substring filter (case-insensitive) runs against this. */
-    readonly display: string;
-    /** Optional dim subtitle — URL/hostname/timestamp/etc. */
-    readonly secondary?: string;
-    /** Optional icon URL (favicon) or single emoji. */
-    readonly icon?: string;
-    /** Indent depth for tree-preserving rendering. 0 = root. Used when the
-     *  caller wants to display tree-shaped data (e.g. tab tree). */
-    readonly depth?: number;
-    /** Stable id linking children to their parent. When set, the picker can
-     *  walk parents during filter to preserve tree context. Combined with
-     *  parentId for tree-preserving filter mode. */
-    readonly id?: string | number;
-    /** Parent id (matches another item's `id`). Optional. Used by the
-     *  tree-preserving filter to walk ancestors. */
-    readonly parentId?: string | number | null;
-    /** Pass-through for action callbacks. */
-    readonly data: unknown;
-  }
-
-  /** Optional menu of secondary actions a picker can offer per row.
-   *  Triggered via Tab on the selected row → opens a sub-picker. */
-  interface PickerAction {
-    /** Label shown in the action sub-menu. */
-    readonly label: string;
-    /** Single-letter shortcut to trigger from the action sub-menu. */
-    readonly key?: string;
-    /** Run against the originally-selected picker item's data. */
-    readonly run: (item: PickerItem) => unknown;
-  }
-
-  let pickerEl: HTMLElement | null = null;
-  let pickerInput: HTMLInputElement | null = null;
-  let pickerList: HTMLElement | null = null;
-  let pickerActive = false;
-  let pickerItems: readonly PickerItem[] = [];
-  let pickerFiltered: PickerItem[] = [];
-  let pickerSelectedIdx = 0;
-  let pickerOnSelect: ((item: PickerItem) => unknown) | null = null;
-  let pickerActions: readonly PickerAction[] = [];
-  /** When true, filter walks parents of matched items so tree context is
-   *  preserved (rendered as `[pfx-picker-context]` rows). */
-  let pickerPreserveTree = false;
-
-  /** Build the picker DOM lazily. After build it lives in the chrome doc
-   *  (display:none) and gets reused on each show. */
-  function ensurePickerBuilt(): void {
-    if (pickerEl) return;
-    pickerEl = document.createXULElement("vbox") as HTMLElement;
-    pickerEl.id = "pfx-picker";
-    pickerEl.hidden = true;
-    pickerEl.setAttribute("aria-modal", "true");
-
-    // Input field at top.
-    const inputBox = document.createXULElement("hbox") as HTMLElement;
-    inputBox.className = "pfx-picker-input-box";
-    const prompt = document.createXULElement("label") as HTMLElement;
-    prompt.className = "pfx-picker-prompt";
-    prompt.setAttribute("value", "›");
-    pickerInput = document.createElement("input");
-    pickerInput.className = "pfx-picker-input";
-    pickerInput.placeholder = "Filter…";
-    inputBox.append(prompt, pickerInput);
-
-    // Scrollable list below.
-    pickerList = document.createXULElement("vbox") as HTMLElement;
-    pickerList.className = "pfx-picker-list";
-
-    pickerEl.append(inputBox, pickerList);
-    document.documentElement.appendChild(pickerEl);
-
-    // Filter on input. Two modes:
-    //   - Flat: substring match on display + secondary.
-    //   - Tree-preserving: matched items + all their ancestors stay
-    //     visible, in original tree order. Ancestors that aren't direct
-    //     matches get the `[pfx-picker-context]` flag for dim styling.
-    pickerInput.addEventListener("input", () => {
-      const q = pickerInput!.value.trim().toLowerCase();
-      pickerFiltered = computeFiltered(pickerItems, q);
-      pickerSelectedIdx = 0;
-      renderPickerList();
-    });
-
-    // Keys (capture phase so we win against vim handler).
-    pickerInput.addEventListener("keydown", (e) => {
-      if (!pickerActive) return;
-      switch (e.key) {
-        case "Escape":
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          dismissPicker();
-          return;
-        case "Enter":
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          commitPicker();
-          return;
-        case "Tab":
-          // Open action sub-menu for current row (if actions are configured).
-          if (pickerActions.length > 0) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            openActionMenu();
-            return;
-          }
-          break;
-        case "ArrowDown":
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          movePickerSelection(1);
-          return;
-        case "ArrowUp":
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          movePickerSelection(-1);
-          return;
-        // Ctrl+J / Ctrl+K for vim-flavored navigation without leaving the
-        // input field. Plain j/k would interfere with typing the filter.
-        case "j":
-          if (e.ctrlKey) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            movePickerSelection(1);
-            return;
-          }
-          break;
-        case "k":
-          if (e.ctrlKey) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            movePickerSelection(-1);
-            return;
-          }
-          break;
-        case "n":
-          if (e.ctrlKey) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            movePickerSelection(1);
-            return;
-          }
-          break;
-        case "p":
-          if (e.ctrlKey) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            movePickerSelection(-1);
-            return;
-          }
-          break;
-      }
-      // Otherwise fall through — input field handles typing naturally.
-    }, true);
-  }
-
-  /** Compute the filtered items list. In flat mode, substring match against
-   *  display + secondary. In tree-preserving mode, matched items + all their
-   *  ancestors stay visible in original tree order; ancestors that aren't
-   *  direct matches get marked context (rendered dimmer). */
-  function computeFiltered(items: readonly PickerItem[], q: string): PickerItem[] {
-    if (!q) return [...items];
-    const matchedSet = new Set<PickerItem>();
-    for (const it of items) {
-      const hay = ((it.display ?? "") + " " + (it.secondary ?? "")).toLowerCase();
-      if (hay.includes(q)) matchedSet.add(it);
-    }
-    if (!pickerPreserveTree) {
-      // Flat: just the matches, in original order.
-      return items.filter((it) => matchedSet.has(it));
-    }
-    // Tree mode: include ancestors of every match.
-    const byId = new Map<string | number, PickerItem>();
-    for (const it of items) {
-      if (it.id != null) byId.set(it.id, it);
-    }
-    const visible = new Set<PickerItem>(matchedSet);
-    for (const m of matchedSet) {
-      let cur: PickerItem | undefined = m;
-      while (cur && cur.parentId != null) {
-        const p = byId.get(cur.parentId);
-        if (!p || visible.has(p)) break;
-        visible.add(p);
-        cur = p;
-      }
-    }
-    // Render in the original (tree-traversal) order.
-    return items.filter((it) => visible.has(it));
-  }
-
-  /** True if the item, given the current filter query, is a direct match
-   *  (vs an ancestor included as tree context). */
-  function isDirectMatch(item: PickerItem, q: string): boolean {
-    if (!q) return true;
-    const hay = ((item.display ?? "") + " " + (item.secondary ?? "")).toLowerCase();
-    return hay.includes(q);
-  }
-
-  function renderPickerList(): void {
-    if (!pickerList) return;
-    while (pickerList.firstChild) pickerList.firstChild.remove();
-    if (!pickerFiltered.length) {
-      const empty = document.createXULElement("label") as HTMLElement;
-      empty.className = "pfx-picker-empty";
-      empty.setAttribute("value", "(no matches)");
-      pickerList.appendChild(empty);
-      return;
-    }
-    const q = pickerInput?.value?.trim().toLowerCase() ?? "";
-    pickerFiltered.forEach((item, idx) => {
-      const row = document.createXULElement("hbox") as HTMLElement;
-      row.className = "pfx-picker-row";
-      if (idx === pickerSelectedIdx) row.setAttribute("pfx-picker-selected", "true");
-      // In tree-preserving mode, items that are visible only because they're
-      // an ancestor of a match get a context flag for dimmer styling.
-      if (pickerPreserveTree && q && !isDirectMatch(item, q)) {
-        row.setAttribute("pfx-picker-context", "true");
-      }
-      // Indent: each level adds 14px (matches palefox's INDENT constant).
-      // Use setProperty(..., "important") to win against the row's
-      // CSS `padding: 6px 14px !important` rule. Plain inline-style
-      // assignment loses to a CSS !important.
-      if (item.depth) {
-        row.style.setProperty(
-          "padding-left",
-          `${14 + (item.depth * 14)}px`,
-          "important",
-        );
-      }
-
-      // Icon column.
-      if (item.icon) {
-        if (/^https?:|^data:|^chrome:|^moz-/.test(item.icon)) {
-          // URL → favicon-shaped <img>.
-          const img = document.createElement("img");
-          img.className = "pfx-picker-icon";
-          img.src = item.icon;
-          img.alt = "";
-          row.appendChild(img);
-        } else {
-          // Treat as inline text (emoji, etc.).
-          const ic = document.createXULElement("label") as HTMLElement;
-          ic.className = "pfx-picker-icon-text";
-          ic.setAttribute("value", item.icon);
-          row.appendChild(ic);
-        }
-      }
-
-      // Display + secondary stacked or inline depending on whether secondary
-      // is set. We keep inline for compactness — primary first, then dim
-      // secondary on the right.
-      const text = document.createXULElement("hbox") as HTMLElement;
-      text.className = "pfx-picker-text";
-      text.setAttribute("flex", "1");
-      const primary = document.createXULElement("label") as HTMLElement;
-      primary.className = "pfx-picker-label";
-      primary.setAttribute("value", item.display);
-      primary.setAttribute("crop", "end");
-      text.appendChild(primary);
-      if (item.secondary) {
-        const sec = document.createXULElement("label") as HTMLElement;
-        sec.className = "pfx-picker-secondary";
-        sec.setAttribute("value", item.secondary);
-        sec.setAttribute("crop", "end");
-        text.appendChild(sec);
-      }
-      row.appendChild(text);
-
-      row.addEventListener("click", () => {
-        pickerSelectedIdx = idx;
-        commitPicker();
-      });
-      pickerList!.appendChild(row);
-    });
-    // Scroll selected into view.
-    const selected = pickerList.querySelector("[pfx-picker-selected='true']");
-    selected?.scrollIntoView({ block: "nearest" });
-  }
-
-  /** Open a sub-picker over the current pickerActions, retaining the
-   *  outer-picker's selected item as the action target. The action-menu
-   *  picker is itself a regular picker — we just stack them. */
-  function openActionMenu(): void {
-    const target = pickerFiltered[pickerSelectedIdx];
-    const actions = pickerActions;
-    if (!target || !actions.length) return;
-    // Snapshot, dismiss the outer picker so its keys don't conflict, then
-    // open the action menu.
-    dismissPicker();
-    showPicker({
-      prompt: `actions ›`,
-      items: actions.map((a) => ({
-        display: a.label + (a.key ? `   (${a.key})` : ""),
-        data: a,
-      })),
-      onSelect: (chosen) => {
-        const action = chosen.data as PickerAction;
-        try { action.run(target); } catch (e) {
-          modelineMsg(`action failed: ${(e as Error).message}`, 4000);
-        }
-      },
-    });
-  }
-
-  function movePickerSelection(delta: number): void {
-    if (!pickerFiltered.length) return;
-    pickerSelectedIdx = (pickerSelectedIdx + delta + pickerFiltered.length) % pickerFiltered.length;
-    renderPickerList();
-  }
-
-  function commitPicker(): void {
-    const item = pickerFiltered[pickerSelectedIdx];
-    const cb = pickerOnSelect;
-    dismissPicker();
-    if (item && cb) cb(item);
-  }
-
-  function dismissPicker(): void {
-    if (!pickerActive) return;
-    pickerActive = false;
-    pickerOnSelect = null;
-    pickerActions = [];
-    pickerPreserveTree = false;
-    if (pickerEl) pickerEl.hidden = true;
-    // Restore vim panel focus if it was active before the picker.
-    if (state.panel) state.panel.focus();
-  }
-
-  /** Public picker API. Show a list, get back the user's pick.
-   *
-   *  Options:
-   *    items          The rows to render. Each may declare display,
-   *                   secondary, icon, depth, id, parentId.
-   *    onSelect       Called when the user picks (Enter or click).
-   *    prompt         Prompt text shown next to the input.
-   *    actions        Optional secondary actions. Tab on a row opens a
-   *                   sub-picker listing these.
-   *    preserveTree   When true, filter walks parent links and keeps
-   *                   ancestors visible as context (dim styling). Used
-   *                   for tree-shaped data like the live tab tree.
-   */
-  function showPicker(opts: {
-    items: readonly PickerItem[];
-    onSelect: (item: PickerItem) => unknown;
-    prompt?: string;
-    actions?: readonly PickerAction[];
-    preserveTree?: boolean;
-  }): void {
-    ensurePickerBuilt();
-    if (!pickerEl || !pickerInput || !pickerList) return;
-    pickerItems = opts.items;
-    pickerSelectedIdx = 0;
-    pickerOnSelect = opts.onSelect;
-    pickerActions = opts.actions ?? [];
-    pickerPreserveTree = !!opts.preserveTree;
-    pickerFiltered = [...opts.items];
-    pickerActive = true;
-
-    // Update the prompt label if provided.
-    const promptEl = pickerEl.querySelector(".pfx-picker-prompt");
-    if (promptEl && opts.prompt) {
-      promptEl.setAttribute("value", opts.prompt);
-    } else if (promptEl) {
-      promptEl.setAttribute("value", "›");
-    }
-
-    pickerInput.value = "";
-    renderPickerList();
-    pickerEl.hidden = false;
-    pickerInput.focus();
-  }
 
   function focusContent(): void {
     gBrowser.selectedBrowser.focus();
@@ -1617,7 +1249,7 @@ export function makeVim(deps: VimDeps): VimAPI {
               return;
             }
             if (!arg) {
-              showPicker({
+              picker.show({
                 prompt: "restore ›",
                 items: tagged.map((e) => ({ display: summarizeEvent(e), data: e })),
                 onSelect: async (item) => {
@@ -1659,7 +1291,7 @@ export function makeVim(deps: VimDeps): VimAPI {
               modelineMsg(q ? `No sessions match "${q}"` : "No sessions yet", 3000);
               return;
             }
-            showPicker({
+            picker.show({
               prompt: "sessions ›",
               items: evs.map((e) => ({ display: summarizeEvent(e), data: e })),
               onSelect: async (item) => {
@@ -1722,7 +1354,7 @@ export function makeVim(deps: VimDeps): VimAPI {
               modelineMsg(q ? `No events match "${q}"` : "No history yet", 3000);
               return;
             }
-            showPicker({
+            picker.show({
               prompt: "history ›",
               items: evs.map((e) => ({ display: summarizeEvent(e), data: e })),
               onSelect: async (item) => {
