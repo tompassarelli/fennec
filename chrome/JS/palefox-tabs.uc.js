@@ -1486,6 +1486,11 @@
           startRename(row);
         }
       });
+      row.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        startRename(row);
+      });
       setupDrag(row);
       syncGroupRow(row);
       return row;
@@ -2364,6 +2369,7 @@
           modelineMsg(`:group ${label}`);
           break;
         }
+        case "re":
         case "refile":
         case "rf": {
           if (!state.cursor) {

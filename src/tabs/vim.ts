@@ -840,6 +840,7 @@ export function makeVim(deps: VimDeps): VimAPI {
         modelineMsg(`:group ${label}`);
         break;
       }
+      case "re":
       case "refile":
       case "rf": {
         if (!state.cursor) {

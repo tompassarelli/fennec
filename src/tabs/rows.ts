@@ -208,6 +208,14 @@ export function makeRows(deps: RowsDeps): RowsAPI {
         startRename(row);
       }
     });
+    // Right-click on a group → rename. We don't have a group-specific
+    // context menu yet; this is the most common ask. (A proper group menu
+    // would replace this once we extend menu.ts to handle row-or-tab targets.)
+    row.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      startRename(row);
+    });
 
     setupDrag(row);
     syncGroupRow(row);
