@@ -147,7 +147,7 @@
 :root {
   --pfx-gap: 6px;
   --pfx-sidebar-inset: 10px;
-  --pfx-compact-trigger-width: 4px;
+  --pfx-compact-trigger-width: 8px;
   --pfx-transition-duration: 0.25s;
   --pfx-transition-easing: linear(
     0 0%, 0.003 1%, 0.011 2%, 0.023 3%, 0.039 4%, 0.058 5%, 0.08 6%,

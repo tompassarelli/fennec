@@ -34,12 +34,24 @@
 
   // src/tabs/log.ts
   var LOG_FILENAME = "palefox-debug.log";
+  var LOG_MAX_BYTES = 5 * 1024 * 1024;
   var _logPath = null;
+  var _rotateChecked = false;
   function logPath() {
     if (_logPath)
       return _logPath;
     _logPath = PathUtils.join(Services.dirsvc.get("ProfD", Ci.nsIFile).path, LOG_FILENAME);
     return _logPath;
+  }
+  function maybeRotate() {
+    if (_rotateChecked)
+      return;
+    _rotateChecked = true;
+    IOUtils.stat(logPath()).then((info) => {
+      if (info.size > LOG_MAX_BYTES) {
+        return IOUtils.write(logPath(), new Uint8Array(0), { mode: "overwrite" });
+      }
+    }).catch(() => {});
   }
   var _lines = [];
   var _flushPending = false;
@@ -49,11 +61,11 @@
       _flushPending = false;
       return;
     }
-    const blob = batch.join(`
+    const blob = new TextEncoder().encode(batch.join(`
 `) + `
-`;
+`);
     const path = logPath();
-    IOUtils.readUTF8(path).then((existing) => IOUtils.writeUTF8(path, existing + blob), () => IOUtils.writeUTF8(path, blob)).then(() => {
+    IOUtils.write(path, blob, { mode: "appendOrCreate" }).then(() => {
       if (_lines.length)
         flush();
       else
@@ -68,6 +80,7 @@
     return (event, data = {}) => {
       if (!Services.prefs.getBoolPref("pfx.debug", false))
         return;
+      maybeRotate();
       console.log(consolePrefix, event, data);
       _lines.push(`${Date.now()} [${tag}] ${event} ${JSON.stringify(data)}`);
       if (!_flushPending) {
