@@ -566,6 +566,7 @@
         }
         state.panel?.removeAttribute("pfx-empty-zone");
       });
+      let lastLoggedPos = null;
       row.addEventListener("dragover", (e) => {
         if (!dragSource || dragSource === row)
           return;
@@ -574,21 +575,46 @@
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
         const rect = row.getBoundingClientRect();
+        const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
-        const zone = rect.height / 3;
-        if (y < zone)
-          dropPosition = "before";
-        else if (y > zone * 2)
-          dropPosition = "after";
-        else
-          dropPosition = "child";
+        const horizontal = isHorizontal();
+        let posBranch;
+        if (horizontal) {
+          if (y > rect.height * 2 / 3) {
+            dropPosition = "child";
+            posBranch = "hz/y>2/3→child";
+          } else if (x < rect.width / 2) {
+            dropPosition = "before";
+            posBranch = "hz/x<w/2→before";
+          } else {
+            dropPosition = "after";
+            posBranch = "hz/x>=w/2→after";
+          }
+        } else {
+          const zone = rect.height / 3;
+          if (y < zone) {
+            dropPosition = "before";
+            posBranch = "vt/y<1/3→before";
+          } else if (y > zone * 2) {
+            dropPosition = "after";
+            posBranch = "vt/y>2/3→after";
+          } else {
+            dropPosition = "child";
+            posBranch = "vt/middle→child";
+          }
+        }
         dropTarget = row;
-        if (row._group) {
-          log2("dragover/group", {
+        if (row._group || lastLoggedPos !== dropPosition) {
+          log2("dragover", {
             target: rowDesc(row),
             source: rowDesc(dragSource),
-            position: dropPosition
+            position: dropPosition,
+            posBranch,
+            rect: { w: Math.round(rect.width), h: Math.round(rect.height) },
+            mouse: { x: Math.round(x), y: Math.round(y) },
+            horizontal
           });
+          lastLoggedPos = dropPosition;
         }
         showDropIndicator(row, dropPosition);
       });
@@ -678,8 +704,11 @@
       p.addEventListener("dragover", (e) => {
         if (!dragSource)
           return;
-        if (e.target !== p && e.target !== state.spacer)
+        const eventTargetDesc = e.target?.id || e.target?.className || e.target?.tagName;
+        if (e.target !== p && e.target !== state.spacer) {
+          log2("dragover/panel:skip", { eventTarget: eventTargetDesc });
           return;
+        }
         const srcPinned = !!dragSource._tab?.pinned;
         let anchor = null;
         if (srcPinned) {
@@ -700,10 +729,19 @@
         if (anchor) {
           dropTarget = anchor;
           dropPosition = "after";
+          log2("dragover/panel:anchor", {
+            eventTarget: eventTargetDesc,
+            anchor: rowDesc(anchor),
+            position: "after"
+          });
           showDropIndicator(anchor, "after");
         } else {
           dropTarget = srcPinned ? p : null;
           dropPosition = "into-empty-panel";
+          log2("dragover/panel:noAnchor", {
+            eventTarget: eventTargetDesc,
+            srcPinned
+          });
         }
       });
       p.addEventListener("drop", (e) => {
@@ -739,7 +777,46 @@
         dropIndicator.id = "pfx-drop-indicator";
       }
       dropIndicator.removeAttribute("pfx-drop-child");
-      dropIndicator.style.marginInlineStart = "";
+      dropIndicator.removeAttribute("pfx-fixed");
+      dropIndicator.style.cssText = "";
+      log2("showDropIndicator", {
+        target: rowDesc(targetRow),
+        position,
+        horizontal: isHorizontal(),
+        rect: targetRow.getBoundingClientRect ? (() => {
+          const r = targetRow.getBoundingClientRect();
+          return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+        })() : null
+      });
+      if (isHorizontal()) {
+        if (!dropIndicator.parentNode) {
+          document.documentElement.appendChild(dropIndicator);
+        } else if (dropIndicator.parentNode !== document.documentElement) {
+          document.documentElement.appendChild(dropIndicator);
+        }
+        const rect = targetRow.getBoundingClientRect();
+        dropIndicator.setAttribute("pfx-fixed", "true");
+        if (position === "child") {
+          dropIndicator.setAttribute("pfx-drop-child", "true");
+          Object.assign(dropIndicator.style, {
+            position: "fixed",
+            left: rect.left + "px",
+            top: rect.bottom - 1 + "px",
+            width: rect.width + "px",
+            height: "2px"
+          });
+        } else {
+          const xEdge = position === "before" ? rect.left - 1 : rect.right - 1;
+          Object.assign(dropIndicator.style, {
+            position: "fixed",
+            left: xEdge + "px",
+            top: rect.top + "px",
+            width: "2px",
+            height: rect.height + "px"
+          });
+        }
+        return;
+      }
       if (position === "child") {
         dropIndicator.setAttribute("pfx-drop-child", "true");
         targetRow.after(dropIndicator);
@@ -1597,6 +1674,7 @@
         return;
       const vertical = isVertical();
       state.panel.toggleAttribute("pfx-horizontal", !vertical);
+      state.pinnedContainer?.toggleAttribute("pfx-horizontal", !vertical);
       document.documentElement.toggleAttribute("pfx-horizontal-tabs", !vertical);
       if (toolboxResizeObs) {
         toolboxResizeObs.disconnect();
@@ -1621,9 +1699,16 @@
         setUrlbarTopLayer(true);
       } else {
         state.panel.removeAttribute("pfx-icons-only");
+        state.pinnedContainer?.removeAttribute("pfx-icons-only");
         const tabbrowserTabs = document.getElementById("tabbrowser-tabs");
-        if (tabbrowserTabs && tabbrowserTabs.nextElementSibling !== state.panel) {
-          tabbrowserTabs.after(state.panel);
+        if (tabbrowserTabs) {
+          if (state.pinnedContainer && tabbrowserTabs.nextElementSibling !== state.pinnedContainer) {
+            tabbrowserTabs.after(state.pinnedContainer);
+          }
+          const anchor = state.pinnedContainer ?? tabbrowserTabs;
+          if (anchor.nextElementSibling !== state.panel) {
+            anchor.after(state.panel);
+          }
         }
         setupHorizontalAlignSpacer();
       }
@@ -1648,6 +1733,7 @@
   }
 
   // src/tabs/rows.ts
+  var log4 = createLogger("tabs/rows");
   function makeRows(deps) {
     const {
       setupDrag,
@@ -1683,9 +1769,10 @@
           } else if (me.shiftKey) {
             selectRange(row);
           } else {
+            const target = hzDisplay.get(row) || tab;
             clearSelection();
-            gBrowser.selectedTab = tab;
-            activateVim(row);
+            gBrowser.selectedTab = target;
+            activateVim(rowOf.get(target) || row);
           }
         } else if (me.button === 1) {
           e.preventDefault();
@@ -1801,55 +1888,144 @@
       updateHorizontalGrid();
     }
     function updateHorizontalGrid() {
-      if (!isHorizontal() || !state.panel)
+      if (!isHorizontal())
         return;
-      let col = 0;
-      let rowInCol = 0;
-      let selectedCol = 0;
-      for (const row of allRows()) {
-        const d = dataOf(row);
-        if (!d)
-          continue;
-        if (row.hidden) {
-          row.removeAttribute("pfx-popout-child");
-          continue;
+      const containers = [state.pinnedContainer, state.panel].filter(Boolean);
+      for (const container of containers) {
+        const rowsInContainer = [
+          ...container.querySelectorAll(".pfx-tab-row, .pfx-group-row")
+        ];
+        let col = 0;
+        let rowInCol = 0;
+        let selectedCol = 0;
+        for (const row of rowsInContainer) {
+          const d = dataOf(row);
+          if (!d)
+            continue;
+          if (row.hidden) {
+            row.removeAttribute("pfx-popout-child");
+            continue;
+          }
+          if (levelOfRow(row) === 0 || col === 0) {
+            col++;
+            rowInCol = 0;
+          }
+          rowInCol++;
+          row.style.gridColumn = String(col);
+          row.style.gridRow = String(rowInCol);
+          row.toggleAttribute("pfx-popout-child", rowInCol > 1);
+          if (row.hasAttribute("selected"))
+            selectedCol = col;
         }
-        if (levelOfRow(row) === 0 || col === 0) {
-          col++;
-          rowInCol = 0;
+        if (col > 0) {
+          const tracks = [];
+          for (let i = 1;i <= col; i++) {
+            tracks.push(i === selectedCol ? "minmax(200px, 200px)" : "minmax(0, 200px)");
+          }
+          container.style.gridTemplateColumns = tracks.join(" ");
+        } else {
+          container.style.gridTemplateColumns = "";
         }
-        rowInCol++;
-        row.style.gridColumn = String(col);
-        row.style.gridRow = String(rowInCol);
-        row.toggleAttribute("pfx-popout-child", rowInCol > 1);
-        if (row.hasAttribute("selected"))
-          selectedCol = col;
-      }
-      if (col > 0) {
-        const tracks = [];
-        for (let i = 1;i <= col; i++) {
-          tracks.push(i === selectedCol ? "minmax(200px, 200px)" : "minmax(0, 200px)");
-        }
-        state.panel.style.gridTemplateColumns = tracks.join(" ");
-      } else {
-        state.panel.style.gridTemplateColumns = "";
       }
       requestAnimationFrame(() => {
-        if (!isHorizontal() || !state.panel)
+        if (!isHorizontal())
           return;
-        const firstRow = state.panel.querySelector(".pfx-tab-row:not([hidden]), .pfx-group-row:not([hidden])");
-        if (firstRow) {
-          state.panel.style.maxHeight = firstRow.offsetHeight + 2 + "px";
+        for (const container of containers) {
+          const firstRow = container.querySelector(".pfx-tab-row:not([hidden]), .pfx-group-row:not([hidden])");
+          if (firstRow) {
+            container.style.maxHeight = firstRow.offsetHeight + 2 + "px";
+          }
+        }
+        const totalPopouts = (state.panel?.querySelectorAll("[pfx-popout-child]").length ?? 0) + (state.pinnedContainer?.querySelectorAll("[pfx-popout-child]").length ?? 0);
+        const urlbar = document.getElementById("urlbar");
+        if (urlbar) {
+          const before = {
+            hasPopover: urlbar.hasAttribute("popover"),
+            matchesOpen: (() => {
+              try {
+                return urlbar.matches(":popover-open");
+              } catch {
+                return null;
+              }
+            })()
+          };
+          if (totalPopouts > 0 && urlbar.hasAttribute("popover")) {
+            urlbar.removeAttribute("popover");
+          }
+          log4("hzGrid:urlbar", { totalPopouts, before, hasPopoverAfter: urlbar.hasAttribute("popover") });
+        }
+        for (const container of containers) {
+          const allRowsInContainer = container.querySelectorAll(".pfx-tab-row, .pfx-group-row");
+          for (const p of allRowsInContainer) {
+            if (p.style.position === "fixed") {
+              p.style.position = "";
+              p.style.left = "";
+              p.style.top = "";
+              p.style.width = "";
+              p.style.zIndex = "";
+            }
+          }
+          const popouts = [...container.querySelectorAll("[pfx-popout-child]")];
+          if (popouts.length) {
+            container.offsetHeight;
+            const rects = popouts.map((p) => p.getBoundingClientRect());
+            for (let i = 0;i < popouts.length; i++) {
+              const p = popouts[i];
+              const r = rects[i];
+              if (r.width > 0 && r.height > 0) {
+                p.style.position = "fixed";
+                p.style.left = r.left + "px";
+                p.style.top = r.top + "px";
+                p.style.width = r.width + "px";
+                p.style.zIndex = "9999";
+              }
+            }
+          }
+        }
+        const popout = state.panel?.querySelector("[pfx-popout-child]");
+        if (popout) {
+          const cs = (el) => {
+            if (!el)
+              return null;
+            const s = window.getComputedStyle(el);
+            const r = el.getBoundingClientRect();
+            return {
+              position: s.position,
+              zIndex: s.zIndex,
+              overflow: s.overflow,
+              rect: {
+                x: Math.round(r.left),
+                y: Math.round(r.top),
+                w: Math.round(r.width),
+                h: Math.round(r.height)
+              }
+            };
+          };
+          log4("hzGrid:stacking", {
+            popout: cs(popout),
+            panel: cs(state.panel),
+            tabsToolbar: cs(document.getElementById("TabsToolbar")),
+            navBar: cs(document.getElementById("nav-bar")),
+            urlbar: cs(document.getElementById("urlbar"))
+          });
         }
       });
     }
     function clearHorizontalGrid() {
-      if (!state.panel)
-        return;
-      state.panel.style.maxHeight = "";
+      for (const container of [state.pinnedContainer, state.panel]) {
+        if (!container)
+          continue;
+        container.style.maxHeight = "";
+        container.style.gridTemplateColumns = "";
+      }
       for (const row of allRows()) {
         row.style.gridColumn = "";
         row.style.gridRow = "";
+        row.style.position = "";
+        row.style.left = "";
+        row.style.top = "";
+        row.style.width = "";
+        row.style.zIndex = "";
         row.removeAttribute("pfx-popout-child");
       }
     }
@@ -1899,7 +2075,7 @@
   }
 
   // src/tabs/vim.ts
-  var log4 = createLogger("tabs/vim");
+  var log5 = createLogger("tabs/vim");
   function makeVim(deps) {
     const { rows, layout, scheduleSave, clearSelection, selectRange, sidebarMain } = deps;
     let chord = null;
@@ -1998,22 +2174,53 @@
       setCursor(row);
     }
     function moveCursor(delta) {
-      if (!state.cursor)
+      if (!state.cursor) {
+        log5("moveCursor:noCursor", { delta });
         return false;
+      }
       const all = allRows();
       const idx = all.indexOf(state.cursor);
-      if (idx < 0)
+      if (idx < 0) {
+        log5("moveCursor:cursorNotInAllRows", { delta, allLen: all.length });
         return false;
+      }
       const step = delta > 0 ? 1 : -1;
+      const skipped = [];
       for (let i = idx + step;i >= 0 && i < all.length; i += step) {
         const row = all[i];
-        if (row.hidden)
+        if (row.hidden) {
+          skipped.push({
+            i,
+            kind: row._tab ? "tab" : row._group ? "group" : "?",
+            label: row._tab?.label || row._group?.name,
+            parentId: row._tab ? treeData(row._tab).parentId : row._group?.id,
+            domParent: row.parentNode === state.pinnedContainer ? "pinned" : row.parentNode === state.panel ? "panel" : "other"
+          });
           continue;
+        }
+        log5("moveCursor:landed", {
+          delta,
+          fromIdx: idx,
+          toIdx: i,
+          skippedHidden: skipped,
+          landedOn: {
+            kind: row._tab ? "tab" : row._group ? "group" : "?",
+            label: row._tab?.label || row._group?.name,
+            parentId: row._tab ? treeData(row._tab).parentId : row._group?.id,
+            domParent: row.parentNode === state.pinnedContainer ? "pinned" : row.parentNode === state.panel ? "panel" : "other"
+          }
+        });
         setCursor(row);
         if (row._tab)
           gBrowser.selectedTab = row._tab;
         return true;
       }
+      log5("moveCursor:noTarget", {
+        delta,
+        fromIdx: idx,
+        allLen: all.length,
+        skippedHidden: skipped
+      });
       return false;
     }
     function prevSiblingTab(row) {
@@ -2680,7 +2887,7 @@
           }
           refileSource = state.cursor;
           const srcLabel = dataOf(state.cursor)?.name || state.cursor._tab?.label || "tab";
-          log4("refile:start", {
+          log5("refile:start", {
             srcLabel,
             srcKind: refileSource._tab ? "tab" : refileSource._group ? "group" : "?",
             srcLevel: levelOfRow(refileSource),
@@ -2724,33 +2931,33 @@
     }
     function executeRefile(target) {
       if (!refileSource) {
-        log4("refile:abort", { reason: "no-refileSource" });
+        log5("refile:abort", { reason: "no-refileSource" });
         return;
       }
       if (!target) {
-        log4("refile:abort", { reason: "no-target" });
+        log5("refile:abort", { reason: "no-target" });
         return;
       }
       if (target === refileSource) {
-        log4("refile:abort", { reason: "target-is-source" });
+        log5("refile:abort", { reason: "target-is-source" });
         return;
       }
       const srcRows = subtreeRows(refileSource);
       if (srcRows.includes(target)) {
-        log4("refile:abort", { reason: "target-in-source-subtree", srcRowsCount: srcRows.length });
+        log5("refile:abort", { reason: "target-in-source-subtree", srcRowsCount: srcRows.length });
         modelineMsg("Can't refile under own subtree", 3000);
         return;
       }
       const srcData = dataOf(refileSource);
       const tgtData = dataOf(target);
       if (!srcData || !tgtData) {
-        log4("refile:abort", { reason: "no-data", hasSrcData: !!srcData, hasTgtData: !!tgtData });
+        log5("refile:abort", { reason: "no-data", hasSrcData: !!srcData, hasTgtData: !!tgtData });
         return;
       }
       const srcKind = refileSource._tab ? "tab" : "group";
       const tgtKind = target._tab ? "tab" : "group";
       const groupCountInSubtree = srcRows.filter((r) => r._group).length;
-      log4("refile:enter", {
+      log5("refile:enter", {
         srcLabel: srcData.name || refileSource._tab?.label,
         tgtLabel: tgtData.name || target._tab?.label,
         srcKind,
@@ -2764,7 +2971,7 @@
       if (refileSource._tab && target._tab) {
         const oldParentId = treeData(refileSource._tab).parentId;
         treeData(refileSource._tab).parentId = treeData(target._tab).id;
-        log4("refile:tab-to-tab", {
+        log5("refile:tab-to-tab", {
           oldParentId,
           newParentId: treeData(target._tab).id,
           groupsAffected: groupCountInSubtree
@@ -2773,20 +2980,20 @@
         const tgtLevel = levelOfRow(target);
         const srcLevel = levelOfRow(refileSource);
         const delta = tgtLevel + 1 - srcLevel;
-        log4("refile:level-delta", { srcLevel, tgtLevel, delta });
+        log5("refile:level-delta", { srcLevel, tgtLevel, delta });
         for (const r of srcRows) {
           if (r._group)
             r._group.level = Math.max(0, (r._group.level || 0) + delta);
         }
       }
       const tgtSub = subtreeRows(target);
-      log4("refile:placing", { tgtSubtreeSize: tgtSub.length });
+      log5("refile:placing", { tgtSubtreeSize: tgtSub.length });
       tgtSub[tgtSub.length - 1].after(...srcRows);
       for (const r of srcRows)
         rows.syncAnyRow(r);
       rows.updateVisibility();
       scheduleSave();
-      log4("refile:done", {
+      log5("refile:done", {
         srcLevelAfter: levelOfRow(refileSource),
         groupLevelsAfter: srcRows.filter((r) => r._group).map((r) => r._group.level)
       });
@@ -2799,7 +3006,7 @@
     }
     function cancelRefile() {
       if (refileSource) {
-        log4("refile:cancel", {});
+        log5("refile:cancel", {});
         refileSource = null;
         searchMatches = [];
         searchIdx = -1;

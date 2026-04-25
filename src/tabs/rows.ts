@@ -21,11 +21,15 @@ import {
   dataOf,
   allRows,
 } from "./helpers.ts";
+import { createLogger } from "./log.ts";
 import { hzDisplay, movingTabs, rowOf, state, treeOf } from "./state.ts";
 import type { Group, Row, Tab } from "./types.ts";
 
 declare const gBrowser: any;
 declare const document: Document;
+declare const window: any;
+
+const log = createLogger("tabs/rows");
 
 // =============================================================================
 // INTERFACE
@@ -103,9 +107,13 @@ export function makeRows(deps: RowsDeps): RowsAPI {
         } else if (me.shiftKey) {
           selectRange(row);
         } else {
+          // In horizontal mode, a collapsed root cell shows the last-selected
+          // member of its tree (hzDisplay). Click should resume that tab and
+          // park the vim cursor on it so the tree expands around it.
+          const target = hzDisplay.get(row) || tab;
           clearSelection();
-          gBrowser.selectedTab = tab;
-          activateVim(row);
+          gBrowser.selectedTab = target;
+          activateVim(rowOf.get(target) || row);
         }
       } else if (me.button === 1) {
         e.preventDefault();
@@ -263,60 +271,150 @@ export function makeRows(deps: RowsDeps): RowsAPI {
 
   /** Assign grid-column / grid-row so each top-level tree forms a column.
    *  Child rows (grid-row > 1) pop out below the tab bar via overflow:visible.
-   *  Panel height is pinned to row 1 so children overlay content. */
+   *  Container height is pinned to row 1 so children overlay content.
+   *  Pinned and panel are separate grid containers — process each one with
+   *  its own column counter. */
   function updateHorizontalGrid(): void {
-    if (!isHorizontal() || !state.panel) return;
-    let col = 0;
-    let rowInCol = 0;
-    let selectedCol = 0;
-    for (const row of allRows()) {
-      const d = dataOf(row);
-      if (!d) continue;
-      if (row.hidden) {
-        row.removeAttribute("pfx-popout-child");
-        continue;
+    if (!isHorizontal()) return;
+    const containers = [state.pinnedContainer, state.panel].filter(Boolean) as HTMLElement[];
+    for (const container of containers) {
+      const rowsInContainer = [
+        ...container.querySelectorAll<HTMLElement>(".pfx-tab-row, .pfx-group-row"),
+      ] as Row[];
+      let col = 0;
+      let rowInCol = 0;
+      let selectedCol = 0;
+      for (const row of rowsInContainer) {
+        const d = dataOf(row);
+        if (!d) continue;
+        if (row.hidden) {
+          row.removeAttribute("pfx-popout-child");
+          continue;
+        }
+        if (levelOfRow(row) === 0 || col === 0) {
+          col++;
+          rowInCol = 0;
+        }
+        rowInCol++;
+        row.style.gridColumn = String(col);
+        row.style.gridRow = String(rowInCol);
+        row.toggleAttribute("pfx-popout-child", rowInCol > 1);
+        if (row.hasAttribute("selected")) selectedCol = col;
       }
-      if (levelOfRow(row) === 0 || col === 0) {
-        col++;
-        rowInCol = 0;
+      if (col > 0) {
+        const tracks: string[] = [];
+        for (let i = 1; i <= col; i++) {
+          tracks.push(i === selectedCol ? "minmax(200px, 200px)" : "minmax(0, 200px)");
+        }
+        container.style.gridTemplateColumns = tracks.join(" ");
+      } else {
+        container.style.gridTemplateColumns = "";
       }
-      rowInCol++;
-      row.style.gridColumn = String(col);
-      row.style.gridRow = String(rowInCol);
-      row.toggleAttribute("pfx-popout-child", rowInCol > 1);
-      if (row.hasAttribute("selected")) selectedCol = col;
     }
-    // Give the selected tab's column a 200px floor while other columns
-    // continue to shrink as more tabs arrive. grid-auto-columns sizes all
-    // columns uniformly, so we build explicit grid-template-columns per
-    // column count.
-    if (col > 0) {
-      const tracks: string[] = [];
-      for (let i = 1; i <= col; i++) {
-        tracks.push(i === selectedCol ? "minmax(200px, 200px)" : "minmax(0, 200px)");
-      }
-      state.panel.style.gridTemplateColumns = tracks.join(" ");
-    } else {
-      state.panel.style.gridTemplateColumns = "";
-    }
-    // Pin panel height to first row so children overlay instead of expanding.
+    // Pin each grid container's height to its first row so children overlay
+    // instead of expanding the toolbar.
     requestAnimationFrame(() => {
-      if (!isHorizontal() || !state.panel) return;
-      const firstRow = state.panel.querySelector<HTMLElement>(
-        ".pfx-tab-row:not([hidden]), .pfx-group-row:not([hidden])",
-      );
-      if (firstRow) {
-        state.panel.style.maxHeight = (firstRow.offsetHeight + 2) + "px";
+      if (!isHorizontal()) return;
+      for (const container of containers) {
+        const firstRow = container.querySelector<HTMLElement>(
+          ".pfx-tab-row:not([hidden]), .pfx-group-row:not([hidden])",
+        );
+        if (firstRow) {
+          container.style.maxHeight = (firstRow.offsetHeight + 2) + "px";
+        }
+      }
+      // Backstop: whenever popouts are visible, the urlbar's popover="manual"
+      // top-layer placement steals priority over them. Demote it; restore on
+      // close. This duplicates vim's setUrlbarTopLayer call to handle paths
+      // (e.g. cursor on pinned root) where vim's expand path didn't fire.
+      const totalPopouts =
+        (state.panel?.querySelectorAll("[pfx-popout-child]").length ?? 0)
+        + (state.pinnedContainer?.querySelectorAll("[pfx-popout-child]").length ?? 0);
+      const urlbar = document.getElementById("urlbar");
+      if (urlbar) {
+        const before = {
+          hasPopover: urlbar.hasAttribute("popover"),
+          matchesOpen: (() => {
+            try { return (urlbar as any).matches(":popover-open"); } catch { return null; }
+          })(),
+        };
+        if (totalPopouts > 0 && urlbar.hasAttribute("popover")) {
+          urlbar.removeAttribute("popover");
+        }
+        log("hzGrid:urlbar", { totalPopouts, before, hasPopoverAfter: urlbar.hasAttribute("popover") });
+      }
+      // Popouts: lift to position:fixed AND promote into the HTML top layer
+      // via popover="manual". The urlbar uses the same trick, and top layer
+      // beats every z-index in the document — that's why our previous z:9999
+      // attempt didn't work.
+      for (const container of containers) {
+        const allRowsInContainer = container.querySelectorAll<HTMLElement>(
+          ".pfx-tab-row, .pfx-group-row",
+        );
+        for (const p of allRowsInContainer) {
+          if (p.style.position === "fixed") {
+            p.style.position = "";
+            p.style.left = "";
+            p.style.top = "";
+            p.style.width = "";
+            p.style.zIndex = "";
+          }
+        }
+        const popouts = [...container.querySelectorAll<HTMLElement>("[pfx-popout-child]")];
+        if (popouts.length) {
+          void container.offsetHeight;
+          const rects = popouts.map(p => p.getBoundingClientRect());
+          for (let i = 0; i < popouts.length; i++) {
+            const p = popouts[i]!;
+            const r = rects[i]!;
+            if (r.width > 0 && r.height > 0) {
+              p.style.position = "fixed";
+              p.style.left = r.left + "px";
+              p.style.top = r.top + "px";
+              p.style.width = r.width + "px";
+              p.style.zIndex = "9999";
+            }
+          }
+        }
+      }
+      // Diagnostic log — keep so future regressions are easy to chase.
+      const popout = state.panel?.querySelector<HTMLElement>("[pfx-popout-child]");
+      if (popout) {
+        const cs = (el: Element | null) => {
+          if (!el) return null;
+          const s = window.getComputedStyle(el);
+          const r = el.getBoundingClientRect();
+          return {
+            position: s.position, zIndex: s.zIndex, overflow: s.overflow,
+            rect: { x: Math.round(r.left), y: Math.round(r.top),
+                    w: Math.round(r.width), h: Math.round(r.height) },
+          };
+        };
+        log("hzGrid:stacking", {
+          popout: cs(popout),
+          panel: cs(state.panel),
+          tabsToolbar: cs(document.getElementById("TabsToolbar")),
+          navBar: cs(document.getElementById("nav-bar")),
+          urlbar: cs(document.getElementById("urlbar")),
+        });
       }
     });
   }
 
   function clearHorizontalGrid(): void {
-    if (!state.panel) return;
-    state.panel.style.maxHeight = "";
+    for (const container of [state.pinnedContainer, state.panel]) {
+      if (!container) continue;
+      container.style.maxHeight = "";
+      container.style.gridTemplateColumns = "";
+    }
     for (const row of allRows()) {
       row.style.gridColumn = "";
       row.style.gridRow = "";
+      row.style.position = "";
+      row.style.left = "";
+      row.style.top = "";
+      row.style.width = "";
+      row.style.zIndex = "";
       row.removeAttribute("pfx-popout-child");
     }
   }

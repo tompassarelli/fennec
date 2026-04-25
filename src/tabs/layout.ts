@@ -88,6 +88,7 @@ export function makeLayout(deps: LayoutDeps): LayoutAPI {
 
     const vertical = isVertical();
     state.panel.toggleAttribute("pfx-horizontal", !vertical);
+    state.pinnedContainer?.toggleAttribute("pfx-horizontal", !vertical);
     document.documentElement.toggleAttribute("pfx-horizontal-tabs", !vertical);
 
     if (toolboxResizeObs) {
@@ -118,9 +119,18 @@ export function makeLayout(deps: LayoutDeps): LayoutAPI {
       setUrlbarTopLayer(true);
     } else {
       state.panel.removeAttribute("pfx-icons-only");
+      state.pinnedContainer?.removeAttribute("pfx-icons-only");
       const tabbrowserTabs = document.getElementById("tabbrowser-tabs");
-      if (tabbrowserTabs && tabbrowserTabs.nextElementSibling !== state.panel) {
-        tabbrowserTabs.after(state.panel);
+      if (tabbrowserTabs) {
+        // Order in toolbar: tabbrowser-tabs → pinned container → panel.
+        if (state.pinnedContainer
+            && tabbrowserTabs.nextElementSibling !== state.pinnedContainer) {
+          tabbrowserTabs.after(state.pinnedContainer);
+        }
+        const anchor = state.pinnedContainer ?? tabbrowserTabs;
+        if (anchor.nextElementSibling !== state.panel) {
+          anchor.after(state.panel);
+        }
       }
       setupHorizontalAlignSpacer();
     }

@@ -24,6 +24,7 @@ import {
 import {
   allRows,
   dataOf,
+  isHorizontal,
   levelOf,
   levelOfRow,
   subtreeRows,
@@ -193,6 +194,7 @@ export function makeDrag(deps: DragDeps): DragAPI {
       state.panel?.removeAttribute("pfx-empty-zone");
     });
 
+    let lastLoggedPos: DropPosition | null = null;
     row.addEventListener("dragover", (e) => {
       if (!dragSource || dragSource === row) return;
       // Don't allow drop onto own subtree.
@@ -201,20 +203,44 @@ export function makeDrag(deps: DragDeps): DragAPI {
       (e as DragEvent).dataTransfer!.dropEffect = "move";
 
       const rect = row.getBoundingClientRect();
+      const x = (e as MouseEvent).clientX - rect.left;
       const y = (e as MouseEvent).clientY - rect.top;
-      const zone = rect.height / 3;
-      if (y < zone) dropPosition = "before";
-      else if (y > zone * 2) dropPosition = "after";
-      else dropPosition = "child";
+      const horizontal = isHorizontal();
+      let posBranch: string;
+      if (horizontal) {
+        // Cells are laid out side-by-side. X picks the sibling side; the
+        // bottom third reaches into "child" (popout below the cell).
+        if (y > rect.height * 2 / 3) {
+          dropPosition = "child";
+          posBranch = "hz/y>2/3→child";
+        } else if (x < rect.width / 2) {
+          dropPosition = "before";
+          posBranch = "hz/x<w/2→before";
+        } else {
+          dropPosition = "after";
+          posBranch = "hz/x>=w/2→after";
+        }
+      } else {
+        // Vertical 3-zone on Y.
+        const zone = rect.height / 3;
+        if (y < zone) { dropPosition = "before"; posBranch = "vt/y<1/3→before"; }
+        else if (y > zone * 2) { dropPosition = "after"; posBranch = "vt/y>2/3→after"; }
+        else { dropPosition = "child"; posBranch = "vt/middle→child"; }
+      }
       dropTarget = row;
-      // Only log on group targets (where the drag-onto-group bug lives) or
-      // on transitions to keep the log tight during rapid-fire dragover.
-      if (row._group) {
-        log("dragover/group", {
+      // Log on group targets (drag-onto-group bug history) and on every
+      // dropPosition transition — silent when sliding within the same zone.
+      if (row._group || lastLoggedPos !== dropPosition) {
+        log("dragover", {
           target: rowDesc(row),
           source: rowDesc(dragSource),
           position: dropPosition,
+          posBranch,
+          rect: { w: Math.round(rect.width), h: Math.round(rect.height) },
+          mouse: { x: Math.round(x), y: Math.round(y) },
+          horizontal,
         });
+        lastLoggedPos = dropPosition;
       }
       showDropIndicator(row, dropPosition);
     });
@@ -312,8 +338,14 @@ export function makeDrag(deps: DragDeps): DragAPI {
   function setupPanelDrop(p: HTMLElement): void {
     p.addEventListener("dragover", (e) => {
       if (!dragSource) return;
+      const eventTargetDesc = (e.target as Element)?.id
+        || (e.target as Element)?.className
+        || (e.target as Element)?.tagName;
       // Only handle if the dragover landed on the panel itself or the spacer.
-      if (e.target !== p && e.target !== state.spacer) return;
+      if (e.target !== p && e.target !== state.spacer) {
+        log("dragover/panel:skip", { eventTarget: eventTargetDesc });
+        return;
+      }
 
       // For unpinned drags, find the last root-level row that isn't part of
       // the source's own subtree — that's the anchor for an "after" drop.
@@ -342,6 +374,11 @@ export function makeDrag(deps: DragDeps): DragAPI {
       if (anchor) {
         dropTarget = anchor;
         dropPosition = "after";
+        log("dragover/panel:anchor", {
+          eventTarget: eventTargetDesc,
+          anchor: rowDesc(anchor),
+          position: "after",
+        });
         showDropIndicator(anchor, "after");
       } else {
         // No usable anchor (empty panel, or unpinned drag where source is
@@ -349,6 +386,9 @@ export function makeDrag(deps: DragDeps): DragAPI {
         // For unpinned: nothing to do (already at end of root).
         dropTarget = srcPinned ? p : null;
         dropPosition = "into-empty-panel";
+        log("dragover/panel:noAnchor", {
+          eventTarget: eventTargetDesc, srcPinned,
+        });
       }
     });
 
@@ -382,8 +422,54 @@ export function makeDrag(deps: DragDeps): DragAPI {
       dropIndicator.id = "pfx-drop-indicator";
     }
     dropIndicator.removeAttribute("pfx-drop-child");
-    dropIndicator.style.marginInlineStart = "";
+    dropIndicator.removeAttribute("pfx-fixed");
+    dropIndicator.style.cssText = "";
 
+    log("showDropIndicator", {
+      target: rowDesc(targetRow),
+      position,
+      horizontal: isHorizontal(),
+      rect: targetRow.getBoundingClientRect ? (() => {
+        const r = targetRow.getBoundingClientRect();
+        return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+      })() : null,
+    });
+
+    if (isHorizontal()) {
+      // Horizontal mode: cells live in a CSS grid. Inserting the indicator in
+      // flow would either land in an auto-placed grid cell or push existing
+      // cells around. Use position:fixed pinned to viewport coords from the
+      // target's bounding rect — escapes the grid entirely.
+      if (!dropIndicator.parentNode) {
+        document.documentElement.appendChild(dropIndicator);
+      } else if (dropIndicator.parentNode !== document.documentElement) {
+        document.documentElement.appendChild(dropIndicator);
+      }
+      const rect = targetRow.getBoundingClientRect();
+      dropIndicator.setAttribute("pfx-fixed", "true");
+      if (position === "child") {
+        dropIndicator.setAttribute("pfx-drop-child", "true");
+        Object.assign(dropIndicator.style, {
+          position: "fixed",
+          left: rect.left + "px",
+          top: (rect.bottom - 1) + "px",
+          width: rect.width + "px",
+          height: "2px",
+        });
+      } else {
+        const xEdge = position === "before" ? rect.left - 1 : rect.right - 1;
+        Object.assign(dropIndicator.style, {
+          position: "fixed",
+          left: xEdge + "px",
+          top: rect.top + "px",
+          width: "2px",
+          height: rect.height + "px",
+        });
+      }
+      return;
+    }
+
+    // Vertical mode — original in-flow indicator.
     if (position === "child") {
       dropIndicator.setAttribute("pfx-drop-child", "true");
       targetRow.after(dropIndicator);

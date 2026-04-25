@@ -219,18 +219,50 @@ export function makeVim(deps: VimDeps): VimAPI {
    *  cross the boundary between the pinned container and the tree panel
    *  in either direction without falling off the edge. */
   function moveCursor(delta: number): boolean {
-    if (!state.cursor) return false;
+    if (!state.cursor) {
+      log("moveCursor:noCursor", { delta });
+      return false;
+    }
     const all = allRows();
     const idx = all.indexOf(state.cursor);
-    if (idx < 0) return false;
+    if (idx < 0) {
+      log("moveCursor:cursorNotInAllRows", { delta, allLen: all.length });
+      return false;
+    }
     const step = delta > 0 ? 1 : -1;
+    const skipped: any[] = [];
     for (let i = idx + step; i >= 0 && i < all.length; i += step) {
       const row = all[i]!;
-      if (row.hidden) continue;
+      if (row.hidden) {
+        skipped.push({
+          i, kind: row._tab ? "tab" : row._group ? "group" : "?",
+          label: row._tab?.label || row._group?.name,
+          parentId: row._tab ? treeData(row._tab).parentId : row._group?.id,
+          domParent: row.parentNode === state.pinnedContainer ? "pinned"
+            : row.parentNode === state.panel ? "panel" : "other",
+        });
+        continue;
+      }
+      log("moveCursor:landed", {
+        delta,
+        fromIdx: idx,
+        toIdx: i,
+        skippedHidden: skipped,
+        landedOn: {
+          kind: row._tab ? "tab" : row._group ? "group" : "?",
+          label: row._tab?.label || row._group?.name,
+          parentId: row._tab ? treeData(row._tab).parentId : row._group?.id,
+          domParent: row.parentNode === state.pinnedContainer ? "pinned"
+            : row.parentNode === state.panel ? "panel" : "other",
+        },
+      });
       setCursor(row);
       if (row._tab) gBrowser.selectedTab = row._tab;
       return true;
     }
+    log("moveCursor:noTarget", {
+      delta, fromIdx: idx, allLen: all.length, skippedHidden: skipped,
+    });
     return false;
   }
 

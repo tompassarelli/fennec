@@ -28,7 +28,6 @@
 #pfx-tab-panel {
   flex: 1 !important;
   max-height: 76%;
-  margin-top: 8px;
   overflow-y: auto !important;
   overflow-x: hidden !important;
   scrollbar-width: thin;
@@ -36,6 +35,19 @@
 #pfx-tab-panel:focus { outline: none; }
 
 /* Icons-only mode (collapsed sidebar layout) */
+/* Icons-only sidebar (collapsed): force both the pinned and panel containers
+ * to flex-column with explicit width so 24px children center reliably. The
+ * min-width pushes the parent #sidebar-main wider than the bare 32px row, so
+ * the strip has breathing room — this is what the old icon-grid CSS used to
+ * give us via horizontal padding. */
+:is(#pfx-pinned-container, #pfx-tab-panel)[pfx-icons-only] {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  width: 100% !important;
+  min-width: 50px !important;
+}
+
 #pfx-tab-panel[pfx-icons-only] .pfx-tab-label,
 #pfx-tab-panel[pfx-icons-only] .pfx-tab-close {
   display: none !important;
@@ -49,7 +61,7 @@
   padding: 4px !important;
   padding-inline-start: 4px !important;
   justify-content: center;
-  margin: 2px auto;
+  margin: 2px 0;
   min-height: unset;
   box-sizing: content-box;
 }
@@ -67,6 +79,10 @@
 
 /* #region pinned tabs — vertical list above the unpinned tree, floating divider */
 
+/* No `display: flex` here — keep the XUL vbox default so the container
+ * stretches to the full sidebar width like #pfx-tab-panel does. Rows center
+ * themselves via `margin: 2px auto` in icons-only mode (see below).
+ * Horizontal mode and empty-zone state override `display` explicitly. */
 #pfx-pinned-container {
   padding: 2px 0;
 }
@@ -85,10 +101,17 @@
 #pfx-pinned-container[pfx-empty-zone]::after {
   display: none;
 }
+/* In icons-only mode the container is `align-items: center` so flex items
+ * size to content — the empty ::after would be 0-width. Stretch it back. */
+#pfx-pinned-container[pfx-icons-only]::after {
+  align-self: stretch;
+}
 
-/* Empty drop zone — shown during drag of unpinned tabs */
+/* Empty drop zone — shown during drag of unpinned tabs.
+ * !important on display + explicit border-right reset so it wins against
+ * horizontal-mode rules that also set display/border. */
 #pfx-pinned-container[pfx-empty-zone] {
-  display: flex;
+  display: flex !important;
   align-items: center;
   justify-content: center;
   min-height: 40px;
@@ -97,6 +120,20 @@
   margin: 4px var(--pfx-sidebar-inset);
   padding: 4px;
   opacity: 0.7;
+}
+/* In horizontal mode the pinned container has a border-right divider — kill
+ * it during the empty-zone state so it doesn't double up with the dashed box. */
+#pfx-pinned-container[pfx-horizontal][pfx-empty-zone] {
+  border-right: none;
+  margin-right: 0;
+  padding-right: 0;
+}
+/* Horizontal-mode empty-zone needs higher specificity than the grid rule
+ * to win the `display:` battle. Two attributes beats one. */
+:is(#pfx-tab-panel, #pfx-pinned-container)[pfx-horizontal][pfx-empty-zone] {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
 }
 #pfx-pinned-container[pfx-empty-zone]::before {
   content: "drop to pin";
@@ -116,7 +153,7 @@
   padding: 4px !important;
   padding-inline-start: 4px !important;
   justify-content: center;
-  margin: 2px auto;
+  margin: 2px 0;
   min-height: unset;
   box-sizing: content-box;
 }
@@ -125,21 +162,19 @@
 }
 
 /* Symmetric drop zone in the tree panel — shown when dragging
- * a pinned tab and the panel has no rows. */
+ * a pinned tab and the panel has no rows. !important on display so it wins
+ * against horizontal-mode's `display: grid` rule. */
 #pfx-tab-panel[pfx-empty-zone] {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
   border: 1.5px dashed color-mix(in srgb, currentColor 25%, transparent);
   border-radius: 4px;
   margin: 4px var(--pfx-sidebar-inset);
   min-height: 60px;
-  position: relative;
 }
 #pfx-tab-panel[pfx-empty-zone]::before {
   content: "drop to unpin";
-  position: absolute;
-  top: 8px;
-  left: 0;
-  right: 0;
-  text-align: center;
   font-size: 11px;
   opacity: 0.6;
   pointer-events: none;
@@ -333,6 +368,17 @@
   margin-top: -1px;
   margin-bottom: -1px;
 }
+/* Horizontal-mode indicator is fixed-positioned by JS; ignore the in-flow
+ * margin/border-radius and just paint a solid bar. */
+#pfx-drop-indicator[pfx-fixed] {
+  margin: 0;
+  border: none;
+  z-index: 9999;
+}
+#pfx-drop-indicator[pfx-fixed][pfx-drop-child] {
+  height: 2px;
+  border: none;
+}
 
 /* #endregion drag and drop */
 
@@ -342,17 +388,24 @@
 :root[pfx-horizontal-tabs] #tabbrowser-tabs {
   display: none !important;
 }
-/* Pinned container has no good home in horizontal mode yet — hide for now. */
-:root[pfx-horizontal-tabs] #pfx-pinned-container {
-  display: none !important;
-}
 :root[pfx-horizontal-tabs] #TabsToolbar {
-  position: relative;
-  z-index: 100;
+  position: relative !important;
+  z-index: 100 !important;
+  /* Popout cells extend below TabsToolbar's row 1 height. overflow:visible
+   * + isolation lets them escape and paint above nav-bar via z-index. */
+  overflow: visible !important;
+  isolation: isolate !important;
   margin-top: 6px;
 }
+/* Don't let navigator-toolbox clip TabsToolbar's popouts. */
+:root[pfx-horizontal-tabs] #navigator-toolbox {
+  overflow: visible !important;
+}
 
-#pfx-tab-panel[pfx-horizontal] {
+/* Horizontal-mode grid layout — both the panel and the pinned container
+ * render as grids of tab cells. Pinned sits before panel, separated by a
+ * vertical divider (border-right on the pinned container). */
+:is(#pfx-tab-panel, #pfx-pinned-container)[pfx-horizontal] {
   display: grid !important;
   /* No min — columns shrink infinitely small as more tabs arrive,
    * rather than scrolling offscreen. */
@@ -360,24 +413,39 @@
   grid-auto-rows: auto;
   justify-content: start;
   align-content: start;
-  /* Fill the toolbar's available width so columns distribute
-   * within the container instead of overflowing. */
-  flex: 1 1 0 !important;
   min-width: 0 !important;
   min-height: unset !important;
   overflow: visible !important;
   z-index: 2;
 }
+/* Panel fills the remaining toolbar width; pinned sizes to its contents. */
+#pfx-tab-panel[pfx-horizontal] {
+  flex: 1 1 0 !important;
+}
+#pfx-pinned-container[pfx-horizontal] {
+  flex: 0 0 auto !important;
+  padding: 0;
+  margin-right: 6px;
+  padding-right: 6px;
+  border-right: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+/* Vertical divider replaces the horizontal one in horizontal mode. */
+#pfx-pinned-container[pfx-horizontal]::after {
+  display: none;
+}
 
-#pfx-tab-panel[pfx-horizontal] .pfx-tab-row,
-#pfx-tab-panel[pfx-horizontal] .pfx-group-row {
+:is(#pfx-tab-panel, #pfx-pinned-container)[pfx-horizontal] .pfx-tab-row,
+:is(#pfx-tab-panel, #pfx-pinned-container)[pfx-horizontal] .pfx-group-row {
   margin: 1px;
   position: relative;
+  /* Reserve space for the absolute-positioned close button so the label
+   * truncates with `crop="end"` before running under it. */
+  padding-inline-end: 28px;
 }
 /* Horizontal mode: close button anchors to the right edge and sits
  * above the label via z-index. When the tab is narrow, it overlaps
  * the truncated label rather than falling off the right edge. */
-#pfx-tab-panel[pfx-horizontal] .pfx-tab-close {
+:is(#pfx-tab-panel, #pfx-pinned-container)[pfx-horizontal] .pfx-tab-close {
   position: absolute;
   right: 6px;
   top: 50%;
@@ -389,10 +457,10 @@
   padding: 1px;
 }
 
-/* Popout children — background so they're readable over content */
-#pfx-tab-panel[pfx-horizontal] [pfx-popout-child] {
-  background: var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22));
-  z-index: 3;
+/* Popout children — solid background so they obscure whatever paints
+ * underneath. Applies to popouts in BOTH the panel and pinned containers. */
+:is(#pfx-tab-panel, #pfx-pinned-container)[pfx-horizontal] [pfx-popout-child] {
+  background: var(--sidebar-background-color, light-dark(#f9f9fb, #1c1b22)) !important;
   margin-top: 0;
   margin-bottom: 0;
 }
