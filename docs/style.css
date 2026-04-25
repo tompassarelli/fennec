@@ -63,6 +63,13 @@ img {
   margin: 0 auto;
 }
 
+.hero .logo {
+  display: block;
+  margin: 0 auto 1.5rem;
+  width: 140px;
+  height: 140px;
+}
+
 .hero h1 {
   font-size: 2.5rem;
   font-weight: 700;

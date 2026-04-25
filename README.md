@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/palefox.png" alt="Palefox logo" width="160" />
+
 # Palefox
 
 #unfencethefox
