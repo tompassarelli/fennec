@@ -212,15 +212,22 @@ export function makeVim(deps: VimDeps): VimAPI {
   }
 
   /** Move cursor by delta (+1 down, -1 up). Skips hidden rows. Selects the
-   *  underlying tab if the cursor lands on a tab row. */
+   *  underlying tab if the cursor lands on a tab row.
+   *
+   *  Walks the flat allRows() array (which returns pinned + panel rows as one
+   *  contiguous list) rather than DOM siblings — that's what lets the cursor
+   *  cross the boundary between the pinned container and the tree panel
+   *  in either direction without falling off the edge. */
   function moveCursor(delta: number): boolean {
     if (!state.cursor) return false;
-    let row = delta > 0 ? state.cursor.nextElementSibling : state.cursor.previousElementSibling;
-    while (row && (row.hidden || row === state.spacer)) {
-      row = delta > 0 ? row.nextElementSibling : row.previousElementSibling;
-    }
-    if (row && row !== state.spacer) {
-      setCursor(row as Row);
+    const all = allRows();
+    const idx = all.indexOf(state.cursor);
+    if (idx < 0) return false;
+    const step = delta > 0 ? 1 : -1;
+    for (let i = idx + step; i >= 0 && i < all.length; i += step) {
+      const row = all[i]!;
+      if (row.hidden) continue;
+      setCursor(row);
       if (row._tab) gBrowser.selectedTab = row._tab;
       return true;
     }

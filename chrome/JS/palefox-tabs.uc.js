@@ -1721,11 +1721,15 @@
     function moveCursor(delta) {
       if (!state.cursor)
         return false;
-      let row = delta > 0 ? state.cursor.nextElementSibling : state.cursor.previousElementSibling;
-      while (row && (row.hidden || row === state.spacer)) {
-        row = delta > 0 ? row.nextElementSibling : row.previousElementSibling;
-      }
-      if (row && row !== state.spacer) {
+      const all = allRows();
+      const idx = all.indexOf(state.cursor);
+      if (idx < 0)
+        return false;
+      const step = delta > 0 ? 1 : -1;
+      for (let i = idx + step;i >= 0 && i < all.length; i += step) {
+        const row = all[i];
+        if (row.hidden)
+          continue;
         setCursor(row);
         if (row._tab)
           gBrowser.selectedTab = row._tab;
