@@ -194,13 +194,24 @@ Mark items as you ship them. Do NOT skip a sprint to start a later one.
       Each line is one `{"type": "...", ...}` object. Parse line-by-line.
 - [x] CLAUDE.md addition: "AI iteration loop" section — points at
       `bun run test:integration` and the JSON format.
-- [ ] Integration tests: tab-tree round-trip across save/restore
-- [ ] Integration tests: vim chords (`dd`, `gg`, `yy`)
-- [ ] Integration tests: drag-drop reorder (will need synthesized drag events)
-- [ ] Document common failure modes + recovery (Firefox didn't start,
-      profile got stuck, port collision)
-- [ ] (stretch) Make the runner support a single-test filter for fast
-      iteration: `bun run test:integration -- --grep="hover strip"`.
+- [x] **Runner refactor:** `IntegrationTest.run` now takes
+      `(mn, ctx: TestContext)`. `ctx.restartFirefox()` kills + respawns
+      with the same profile, returning a fresh client. Used by the
+      persistence round-trip test.
+- [x] **Single-test filter:** `bun run test:integration -- --grep "hover"`
+      (substring match, case-insensitive).
+- [x] **Integration tests added:**
+      - `compact.ts` — 8 tests (bootstrap, pref observer, hover strip,
+        horizontal mode, verticalTabs auto-swap, popup pin, dismiss,
+        destroy)
+      - `persist.ts` — 2 tests (tree-file write on tab events, file
+        survives Firefox restart)
+      - `vim.ts` — 5 tests (activation via row click, j/k navigation,
+        gg/G chords, Escape deactivation)
+      - `drag.ts` — 3 tests (full drag chain reorders gBrowser.tabs,
+        cancelled drag leaves order intact, [pfx-dragging] attribute
+        lifecycle)
+- [x] Failure-mode docs (see Troubleshooting section below).
 
 ---
 
@@ -251,3 +262,91 @@ with `which firefox` once and bake the path into the test-driver config.
 - Profile reuse vs ephemeral: ephemeral is safer (clean state) but slower
   (~1s of profile setup per test). Could amortize by running multiple tests
   per profile if we add a reset between them.
+
+---
+
+## Troubleshooting
+
+When the integration suite breaks, here's what to check (most common
+first):
+
+### `EADDRINUSE` / "could not connect to Marionette"
+
+Port 2828 is already bound. Either:
+- A previous Firefox spawn didn't clean up (check `ps -ef | grep -i
+  firefox`); kill the leftover.
+- Something else on your machine is on 2828 (rare).
+- You're running two test suites in parallel — don't.
+
+The runner uses `marionettePort: 2828` by default. If you need to share
+the box with something else on 2828, override:
+
+```ts
+runAll({ marionettePort: 12828 });
+```
+
+…and write that same port into the test profile's `user.js`
+(`marionette.port`).
+
+### "System access is required. Start Firefox with `--remote-allow-system-access`"
+
+Firefox 128+ requires this flag for chrome-context script eval. Already
+in our spawn args; if you see this, something stripped the flag (custom
+runner, launch wrapper). Check `tools/test-driver/runner.ts:spawnFirefox`.
+
+### Test times out waiting for `#sidebar-main` / `#sidebar-button`
+
+`#sidebar-main` exists in headless mode (verified). `#sidebar-button`
+does **not** — it's a customizable toolbar widget that Firefox doesn't
+render under `--headless`. Tests should target `#sidebar-main`,
+`#navigator-toolbox`, `#urlbar`, etc., not the toolbar buttons.
+
+If a test legitimately needs toolbar UI, run headed (drop `--headless`
+from spawn args) or skip the test under headless and document why.
+
+### Test fails immediately after a previous test that auto-hid the sidebar
+
+palefox stamps a 280ms "collapse-protection" window after any visible →
+hidden compact transition. A test that enables compact and immediately
+dispatches `pfx-flash` may have its reveal dropped. Wait out the window:
+
+```ts
+await new Promise((r) => setTimeout(r, 350));
+```
+
+This is a real protection palefox applies — the test catching it is the
+substrate working correctly, not a bug.
+
+### Profile cleanup leaks (`/tmp/palefox-test-*` directories piling up)
+
+`runAll()` cleans up via `profile.cleanup()` in a finally block. If the
+process crashed before reaching it (Bun panic, SIGKILL), the directory
+stays. Periodic cleanup:
+
+```sh
+rm -rf /tmp/palefox-test-*
+```
+
+Cheap to do — these dirs hold an entire palefox `chrome/` copy plus a
+`palefox-debug.log` from the last run.
+
+### `lazy.ServerSocket` is undefined / Marionette server not starting
+
+The profile's `user.js` is missing `marionette.port = 2828` or
+`marionette.enabled = true`. Check `tools/test-driver/profile.ts`'s
+`DEFAULT_USER_JS` constant.
+
+### Synthesized DragEvents don't fire palefox handlers
+
+Make sure you're constructing `new DragEvent(...)` with `dataTransfer:
+new DataTransfer()` and reusing the same `DataTransfer` across the chain
+(dragstart → dragenter → dragover → drop → dragend). Missing
+`dataTransfer` on dragstart causes palefox's handler to bail before
+setting `dragSource`.
+
+### Synthesized KeyboardEvents don't trigger vim chords
+
+palefox's vim handler is gated on `panelActive`. The flag toggles when a
+row is clicked (mousedown). Tests must dispatch mousedown on a tab row
+**before** dispatching the key sequence — see `tests/integration/vim.ts`
+for the working pattern.

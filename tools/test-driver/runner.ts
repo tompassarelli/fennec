@@ -30,11 +30,24 @@ import { join, basename } from "node:path";
 import { connectMarionette, type MarionetteClient } from "./marionette.ts";
 import { createProfile, type TestProfile } from "./profile.ts";
 
+export interface TestContext {
+  /** Path to the ephemeral profile directory. Stable across restarts within
+   *  one test run; auto-cleaned at the end. */
+  readonly profilePath: string;
+  /** Kill Firefox, respawn with the SAME profile, reconnect Marionette, set
+   *  chrome context. Returns the new client; the prior client is dead.
+   *
+   *  Use for state-persistence tests (tree round-trip across session
+   *  restore). The profile's `chrome/` directory and any palefox-written
+   *  files (palefox-tab-tree.json, palefox-debug.log) survive the restart. */
+  restartFirefox(): Promise<MarionetteClient>;
+}
+
 export interface IntegrationTest {
   /** Human-readable test name. Should be unique within a file. */
   name: string;
   /** Function that drives the connected client. Throws to fail. */
-  run(mn: MarionetteClient): Promise<void>;
+  run(mn: MarionetteClient, ctx: TestContext): Promise<void>;
 }
 
 export interface RunnerOptions {
@@ -46,6 +59,9 @@ export interface RunnerOptions {
   marionettePort?: number;
   /** Print verbose diagnostics to stderr. */
   verbose?: boolean;
+  /** Substring filter on test names; non-matches are skipped. Useful for
+   *  fast iteration on a single test. Case-insensitive. */
+  grep?: string;
 }
 
 interface JsonEvent {
@@ -121,9 +137,21 @@ export async function runAll(opts: RunnerOptions = {}): Promise<{ pass: number; 
   const marionettePort = opts.marionettePort ?? 2828;
 
   const suites = await loadTests(testDir);
+  // Apply --grep filter. We filter at the suite level so empty suites get
+  // dropped entirely rather than emitting a misleading "test:start"-then-
+  // -nothing pattern.
+  if (opts.grep) {
+    const needle = opts.grep.toLowerCase();
+    for (const s of suites) {
+      s.tests = s.tests.filter((t) => t.name.toLowerCase().includes(needle));
+    }
+  }
   const totalCount = suites.reduce((n, s) => n + s.tests.length, 0);
   if (totalCount === 0) {
-    emit({ type: "summary", pass: 0, fail: 0, durationMs: 0, note: "no tests found" });
+    emit({
+      type: "summary", pass: 0, fail: 0, durationMs: 0,
+      note: opts.grep ? `no tests match --grep "${opts.grep}"` : "no tests found",
+    });
     return { pass: 0, fail: 0 };
   }
 
@@ -134,22 +162,50 @@ export async function runAll(opts: RunnerOptions = {}): Promise<{ pass: number; 
   let fail = 0;
   const start = Date.now();
 
+  async function killFirefox(): Promise<void> {
+    if (!firefox || firefox.killed) return;
+    firefox.kill("SIGTERM");
+    await new Promise<void>((r) => {
+      const timer = setTimeout(() => {
+        try { firefox!.kill("SIGKILL"); } catch {}
+        r();
+      }, 3000);
+      firefox!.once("exit", () => { clearTimeout(timer); r(); });
+    });
+  }
+
+  async function bootFirefox(profilePath: string): Promise<MarionetteClient> {
+    firefox = await spawnFirefox({
+      firefoxBin, profilePath, marionettePort, verbose: opts.verbose,
+    });
+    const client = await connectMarionette({ port: marionettePort });
+    await client.newSession();
+    await client.setContext("chrome");
+    return client;
+  }
+
   try {
     profile = await createProfile();
     if (opts.verbose) logErr(`profile: ${profile.path}`);
-    firefox = await spawnFirefox({ firefoxBin, profilePath: profile.path, marionettePort, verbose: opts.verbose });
-
-    mn = await connectMarionette({ port: marionettePort });
-    await mn.newSession();
-    await mn.setContext("chrome");
+    mn = await bootFirefox(profile.path);
 
     for (const suite of suites) {
       for (const t of suite.tests) {
         const file = suite.file;
         emit({ type: "test:start", name: t.name, file });
         const tStart = Date.now();
+        const ctx: TestContext = {
+          profilePath: profile.path,
+          async restartFirefox() {
+            try { await mn!.deleteSession(); } catch {}
+            mn!.disconnect();
+            await killFirefox();
+            mn = await bootFirefox(profile!.path);
+            return mn;
+          },
+        };
         try {
-          await t.run(mn);
+          await t.run(mn, ctx);
           emit({ type: "test:pass", name: t.name, file, durationMs: Date.now() - tStart });
           pass++;
         } catch (e) {
@@ -171,13 +227,7 @@ export async function runAll(opts: RunnerOptions = {}): Promise<{ pass: number; 
       try { await mn.deleteSession(); } catch {}
       mn.disconnect();
     }
-    if (firefox && !firefox.killed) {
-      firefox.kill("SIGTERM");
-      await new Promise<void>((r) => {
-        const t = setTimeout(() => { try { firefox!.kill("SIGKILL"); } catch {} r(); }, 3000);
-        firefox!.once("exit", () => { clearTimeout(t); r(); });
-      });
-    }
+    await killFirefox();
     if (profile) {
       try { await profile.cleanup(); } catch {}
     }
@@ -188,8 +238,15 @@ export async function runAll(opts: RunnerOptions = {}): Promise<{ pass: number; 
 }
 
 if (import.meta.main) {
-  const verbose = process.argv.includes("--verbose");
-  runAll({ verbose })
+  const args = process.argv.slice(2);
+  const verbose = args.includes("--verbose");
+  // --grep <substring> OR --grep=<substring>
+  let grep: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--grep" && args[i + 1]) { grep = args[i + 1]; i++; continue; }
+    if (args[i]!.startsWith("--grep=")) { grep = args[i]!.slice("--grep=".length); }
+  }
+  runAll({ verbose, grep })
     .then(({ fail }) => process.exit(fail > 0 ? 1 : 0))
     .catch((e) => {
       logErr(`fatal: ${(e as Error).stack ?? e}`);
