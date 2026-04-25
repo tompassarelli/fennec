@@ -114,8 +114,11 @@
 #pfx-pinned-container .pfx-tab-icon {
   margin: 0;
 }
+/* Collapsed (icons-only) sidebar: stack pinned tabs vertically, one per row. */
 #pfx-pinned-container[pfx-icons-only] {
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
 }
 #pfx-pinned-container[pfx-icons-only] .pfx-tab-row {
   width: 24px;
