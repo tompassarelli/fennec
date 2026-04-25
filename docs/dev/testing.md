@@ -238,6 +238,20 @@ Mark items as you ship them. Do NOT skip a sprint to start a later one.
       across N iterations as JSON. Currently covers: compact pref-flip
       latencies (on/off) + `snapshotTree` cost. Override iterations via
       `PFX_BENCH_ITERATIONS=100`.
+- [x] **Perf budgets** (post-expansion add): each `Benchmark` can declare
+      `budget: { maxMedianMs?, maxMaxMs?, maxMeanMs? }`. Violations emit
+      `bench:budget-exceeded` events and the runner exits 1. Budgets are
+      currently set ~3× current observed numbers — comfortably above
+      noise, tight enough to catch regressions that add a sync-IO call
+      or accidental setTimeout(0) chain.
+- [x] **Regression test bank** (`tests/integration/compact-regressions.ts`):
+      locks in fixes for the bugs we hit while building palefox itself.
+      Currently 4 tests covering: window.blur bubbling, collapse-protection
+      drops, orphaned _openPopups counter, dbg/isGuarded recursion safety.
+- [x] **Tab-grouping integration tests** (`tests/integration/groups.ts`):
+      4 tests covering createGroupRow attributes, string-parentId →
+      group.level + 1 resolution, snapshotTree group representation,
+      persisted tree file group entries with afterTabId.
 
 ---
 

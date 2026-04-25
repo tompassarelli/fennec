@@ -33,6 +33,20 @@ export interface Benchmark {
    *  what counts (e.g., a save-event cycle or a full pref-flip + observer
    *  cascade). */
   run(mn: MarionetteClient): Promise<number>;
+  /** Optional perf budget. The bench fails (non-zero exit code) if any of
+   *  these thresholds are exceeded. Set conservatively above current
+   *  measurements so noise doesn't trip them; tighten over time as the
+   *  baseline stabilizes.
+   *
+   *  Set ALL fields you want enforced; missing fields are not asserted. */
+  budget?: {
+    /** Median across iterations must be ≤ this many ms. */
+    maxMedianMs?: number;
+    /** Worst single iteration must be ≤ this many ms. */
+    maxMaxMs?: number;
+    /** Mean across iterations must be ≤ this many ms. */
+    maxMeanMs?: number;
+  };
 }
 
 export interface BenchOptions {
@@ -90,7 +104,7 @@ async function spawnFirefox(opts: {
   return child;
 }
 
-export async function runBenches(opts: BenchOptions = {}): Promise<void> {
+export async function runBenches(opts: BenchOptions = {}): Promise<{ budgetViolations: number }> {
   const firefoxBin = opts.firefoxBin ?? process.env.FIREFOX_BIN ?? "firefox";
   const benchDir = opts.benchDir ?? join(process.cwd(), "tests/bench");
   const marionettePort = opts.marionettePort ?? 2828;
@@ -99,12 +113,13 @@ export async function runBenches(opts: BenchOptions = {}): Promise<void> {
   const total = suites.reduce((n, s) => n + s.benches.length, 0);
   if (total === 0) {
     emit({ type: "summary", totalMs: 0, benches: 0, note: "no benchmarks found" });
-    return;
+    return { budgetViolations: 0 };
   }
 
   let profile: TestProfile | null = null;
   let firefox: ChildProcess | null = null;
   let mn: MarionetteClient | null = null;
+  let budgetViolations = 0;
   const start = Date.now();
 
   try {
@@ -131,15 +146,36 @@ export async function runBenches(opts: BenchOptions = {}): Promise<void> {
             break;
           }
         }
-        if (samples.length === b.iterations) {
+        if (samples.length !== b.iterations) continue;
+        const minVal = Math.min(...samples);
+        const medianVal = median(samples);
+        const maxVal = Math.max(...samples);
+        const meanVal = samples.reduce((a, b) => a + b, 0) / samples.length;
+
+        // Budget enforcement.
+        const violations: string[] = [];
+        if (b.budget?.maxMedianMs != null && medianVal > b.budget.maxMedianMs) {
+          violations.push(`median ${medianVal.toFixed(2)}ms > budget ${b.budget.maxMedianMs}ms`);
+        }
+        if (b.budget?.maxMaxMs != null && maxVal > b.budget.maxMaxMs) {
+          violations.push(`max ${maxVal.toFixed(2)}ms > budget ${b.budget.maxMaxMs}ms`);
+        }
+        if (b.budget?.maxMeanMs != null && meanVal > b.budget.maxMeanMs) {
+          violations.push(`mean ${meanVal.toFixed(2)}ms > budget ${b.budget.maxMeanMs}ms`);
+        }
+        if (violations.length > 0) {
+          budgetViolations++;
+          emit({
+            type: "bench:budget-exceeded", name: b.name, file: suite.file,
+            min: minVal, median: medianVal, max: maxVal, mean: meanVal,
+            samples, violations, budget: b.budget,
+          });
+        } else {
           emit({
             type: "bench:result", name: b.name, file: suite.file,
             iterations: samples.length,
-            min: Math.min(...samples),
-            median: median(samples),
-            max: Math.max(...samples),
-            mean: samples.reduce((a, b) => a + b, 0) / samples.length,
-            samples,
+            min: minVal, median: medianVal, max: maxVal, mean: meanVal,
+            samples, budget: b.budget,
           });
         }
       }
@@ -161,13 +197,19 @@ export async function runBenches(opts: BenchOptions = {}): Promise<void> {
     if (profile) try { await profile.cleanup(); } catch {}
   }
 
-  emit({ type: "summary", totalMs: Date.now() - start, benches: total });
+  emit({
+    type: "summary",
+    totalMs: Date.now() - start,
+    benches: total,
+    budgetViolations,
+  });
+  return { budgetViolations };
 }
 
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const verbose = args.includes("--verbose");
   runBenches({ verbose })
-    .then(() => process.exit(0))
+    .then(({ budgetViolations }) => process.exit(budgetViolations > 0 ? 1 : 0))
     .catch((e) => { logErr(`fatal: ${(e as Error).stack ?? e}`); process.exit(1); });
 }

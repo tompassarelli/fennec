@@ -15,10 +15,15 @@ import type { Benchmark } from "../../tools/test-driver/bench-runner.ts";
 
 const ITERATIONS = Number(process.env.PFX_BENCH_ITERATIONS ?? 20);
 
+// Budgets are set ~3x current observed numbers — comfortably above noise,
+// tight enough to catch a regression that adds a new sync-IO call or an
+// accidental setTimeout(0) chain. Tighten as the baseline stabilizes.
+
 const benches: Benchmark[] = [
   {
     name: "compact-on: pref-flip → data-pfx-compact attribute set",
     iterations: ITERATIONS,
+    budget: { maxMedianMs: 2.0, maxMaxMs: 5.0 },
     async run(mn) {
       // Ensure starting state is OFF.
       await mn.executeScript(`Services.prefs.setBoolPref("pfx.sidebar.compact", false);`);
@@ -45,6 +50,7 @@ const benches: Benchmark[] = [
   {
     name: "compact-off: pref-flip → data-pfx-compact attribute removed",
     iterations: ITERATIONS,
+    budget: { maxMedianMs: 3.0, maxMaxMs: 6.0 },
     async run(mn) {
       // Ensure starting state is ON.
       await mn.executeScript(`Services.prefs.setBoolPref("pfx.sidebar.compact", true);`);
@@ -65,6 +71,7 @@ const benches: Benchmark[] = [
   {
     name: "snapshotTree: pfxTest.snapshotTree() over current tabs",
     iterations: ITERATIONS,
+    budget: { maxMedianMs: 0.5, maxMaxMs: 2.0 },
     async run(mn) {
       const elapsed = await mn.executeScript<number>(`
         if (!window.pfxTest) throw new Error("pfxTest not exposed");
