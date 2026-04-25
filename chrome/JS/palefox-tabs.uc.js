@@ -228,20 +228,174 @@
     return node;
   }
 
+  // src/tabs/helpers.ts
+  var log = createLogger("tabs");
+  var SS = (() => {
+    try {
+      if (typeof SessionStore !== "undefined")
+        return SessionStore;
+    } catch {}
+    try {
+      return ChromeUtils.importESModule("resource:///modules/sessionstore/SessionStore.sys.mjs").SessionStore;
+    } catch (e) {
+      console.error("palefox-tabs: SessionStore unavailable", e);
+      return null;
+    }
+  })();
+  var pinAttrRegistered = false;
+  function tryRegisterPinAttr() {
+    if (pinAttrRegistered || !SS?.persistTabAttribute)
+      return;
+    try {
+      SS.persistTabAttribute(PIN_ATTR);
+      pinAttrRegistered = true;
+    } catch (e) {
+      console.error("palefox-tabs: persistTabAttribute failed", e);
+    }
+  }
+  function pinTabId(tab, id) {
+    try {
+      tab.setAttribute(PIN_ATTR, String(id));
+    } catch {}
+  }
+  function readPinnedId(tab) {
+    try {
+      const v = tab.getAttribute?.(PIN_ATTR);
+      if (v) {
+        const n = Number(v);
+        if (n)
+          return n;
+      }
+    } catch {}
+    return 0;
+  }
+  function treeData(tab) {
+    if (!treeOf.has(tab)) {
+      let id = readPinnedId(tab);
+      if (id) {
+        if (id >= state.nextTabId)
+          state.nextTabId = id + 1;
+        log("treeData:pfxId", { pfxId: id, label: tab.label, nextTabId: state.nextTabId });
+      } else {
+        id = state.nextTabId++;
+        pinTabId(tab, id);
+        log("treeData:fresh", { id, label: tab.label, nextTabId: state.nextTabId });
+      }
+      treeOf.set(tab, {
+        id,
+        parentId: null,
+        name: null,
+        state: null,
+        collapsed: false
+      });
+    }
+    return treeOf.get(tab);
+  }
+  function tabById(id) {
+    if (!id)
+      return null;
+    for (const t of gBrowser.tabs) {
+      if (treeOf.get(t)?.id === id)
+        return t;
+    }
+    return null;
+  }
+  function parentOfTab(tab) {
+    return tabById(treeData(tab).parentId);
+  }
+  function levelOf(tab) {
+    let lv = 0;
+    let t = tab;
+    const seen = new Set;
+    while (t && !seen.has(t)) {
+      seen.add(t);
+      const pid = treeData(t).parentId;
+      if (!pid)
+        break;
+      const p = tabById(pid);
+      if (!p)
+        break;
+      lv++;
+      t = p;
+    }
+    return lv;
+  }
+  function levelOfRow(row) {
+    if (!row)
+      return 0;
+    if (row._group)
+      return row._group.level || 0;
+    if (row._tab)
+      return levelOf(row._tab);
+    return 0;
+  }
+  function dataOf(row) {
+    if (row._group)
+      return row._group;
+    if (row._tab)
+      return treeData(row._tab);
+    return null;
+  }
+  function allTabs() {
+    return [...gBrowser.tabs];
+  }
+  function allRows() {
+    const pinned = state.pinnedContainer ? [...state.pinnedContainer.querySelectorAll(".pfx-tab-row")] : [];
+    const treeRows = state.panel ? [...state.panel.querySelectorAll(".pfx-tab-row, .pfx-group-row")] : [];
+    return [...pinned, ...treeRows];
+  }
+  function hasChildren(row) {
+    const next = row.nextElementSibling;
+    if (!next || next === state.spacer)
+      return false;
+    return levelOfRow(next) > levelOfRow(row);
+  }
+  function subtreeRows(row) {
+    if (!row)
+      return [];
+    const lv = levelOfRow(row);
+    const out = [row];
+    let next = row.nextElementSibling;
+    while (next && next !== state.spacer) {
+      if (levelOfRow(next) <= lv)
+        break;
+      out.push(next);
+      next = next.nextElementSibling;
+    }
+    return out;
+  }
+  function isHorizontal() {
+    return !!state.panel?.hasAttribute("pfx-horizontal");
+  }
+  function tabUrl(tab) {
+    if (!tab)
+      return "";
+    const spec = tab.linkedBrowser?.currentURI?.spec;
+    if (spec && spec !== "about:blank")
+      return spec;
+    if (SS) {
+      try {
+        const raw = SS.getTabState(tab);
+        if (raw) {
+          const ts = JSON.parse(raw);
+          const entries = ts.entries;
+          if (Array.isArray(entries) && entries.length) {
+            const idx = Math.max(0, Math.min(entries.length - 1, (ts.index || 1) - 1));
+            const entryUrl = entries[idx]?.url;
+            if (entryUrl)
+              return entryUrl;
+          }
+        }
+      } catch (e) {
+        console.error("palefox-tabs: getTabState failed", e);
+      }
+    }
+    return spec || "";
+  }
+
   // src/tabs/drag.ts
   function makeDrag(deps) {
-    const {
-      subtreeRows,
-      levelOfRow,
-      dataOf,
-      allRows,
-      treeData,
-      tabById,
-      syncTabRow,
-      clearSelection,
-      scheduleTreeResync,
-      scheduleSave
-    } = deps;
+    const { syncTabRow, clearSelection, scheduleTreeResync, scheduleSave } = deps;
     let dragSource = null;
     let dropIndicator = null;
     let dropTarget = null;
@@ -545,147 +699,12 @@
   var sidebarMain = document.getElementById("sidebar-main");
   if (!sidebarMain)
     return;
-  var SS = (() => {
-    try {
-      if (typeof SessionStore !== "undefined")
-        return SessionStore;
-    } catch {}
-    try {
-      return ChromeUtils.importESModule("resource:///modules/sessionstore/SessionStore.sys.mjs").SessionStore;
-    } catch (e) {
-      console.error("palefox-tabs: SessionStore unavailable", e);
-      return null;
-    }
-  })();
   var groupCounter = 0;
   var chord = null;
   var chordTimer = 0;
   var pendingCursorMove = false;
   var _lastLoadedNodes = [];
   var _inSessionRestore = true;
-  var pinAttrRegistered = false;
-  function tryRegisterPinAttr() {
-    if (pinAttrRegistered || !SS?.persistTabAttribute)
-      return;
-    try {
-      SS.persistTabAttribute(PIN_ATTR);
-      pinAttrRegistered = true;
-    } catch (e) {
-      console.error("palefox-tabs: persistTabAttribute failed", e);
-    }
-  }
-  function pinTabId(tab, id) {
-    try {
-      tab.setAttribute(PIN_ATTR, String(id));
-    } catch {}
-  }
-  function readPinnedId(tab) {
-    try {
-      const v = tab.getAttribute?.(PIN_ATTR);
-      if (v) {
-        const n = Number(v);
-        if (n)
-          return n;
-      }
-    } catch {}
-    return 0;
-  }
-  function treeData(tab) {
-    if (!treeOf.has(tab)) {
-      let id = readPinnedId(tab);
-      if (id) {
-        if (id >= state.nextTabId)
-          state.nextTabId = id + 1;
-        pfxLog("treeData:pfxId", { pfxId: id, label: tab.label, nextTabId: state.nextTabId });
-      } else {
-        id = state.nextTabId++;
-        pinTabId(tab, id);
-        pfxLog("treeData:fresh", { id, label: tab.label, nextTabId: state.nextTabId });
-      }
-      treeOf.set(tab, {
-        id,
-        parentId: null,
-        name: null,
-        state: null,
-        collapsed: false
-      });
-    }
-    return treeOf.get(tab);
-  }
-  function tabById(id) {
-    if (!id)
-      return null;
-    for (const t of gBrowser.tabs) {
-      if (treeOf.get(t)?.id === id)
-        return t;
-    }
-    return null;
-  }
-  function levelOf(tab) {
-    let lv = 0, t = tab;
-    const seen = new Set;
-    while (t && !seen.has(t)) {
-      seen.add(t);
-      const pid = treeData(t).parentId;
-      if (!pid)
-        break;
-      const p = tabById(pid);
-      if (!p)
-        break;
-      lv++;
-      t = p;
-    }
-    return lv;
-  }
-  function levelOfRow(row) {
-    if (!row)
-      return 0;
-    if (row._group)
-      return row._group.level || 0;
-    if (row._tab)
-      return levelOf(row._tab);
-    return 0;
-  }
-  function parentOfTab(tab) {
-    return tabById(treeData(tab).parentId);
-  }
-  function dataOf(row) {
-    if (row._group)
-      return row._group;
-    if (row._tab)
-      return treeData(row._tab);
-    return null;
-  }
-  function isHorizontal() {
-    return state.panel?.hasAttribute("pfx-horizontal");
-  }
-  function allTabs() {
-    return [...gBrowser.tabs];
-  }
-  function allRows() {
-    const pinned = state.pinnedContainer ? [...state.pinnedContainer.querySelectorAll(".pfx-tab-row")] : [];
-    return [...pinned, ...state.panel.querySelectorAll(".pfx-tab-row, .pfx-group-row")];
-  }
-  function hasChildren(row) {
-    const next = row.nextElementSibling;
-    if (!next || next === state.spacer)
-      return false;
-    return levelOfRow(next) > levelOfRow(row);
-  }
-  function subtreeRows(row) {
-    if (!row)
-      return [];
-    const lv = levelOfRow(row);
-    const out = [row];
-    let next = row.nextElementSibling;
-    while (next && next !== state.spacer) {
-      if (levelOfRow(next) <= lv)
-        break;
-      out.push(next);
-      next = next.nextElementSibling;
-    }
-    return out;
-  }
   function clearSelection() {
     for (const r of selection)
       r.removeAttribute("pfx-multi");
@@ -910,31 +929,6 @@
       state.pinnedContainer.hidden = !state.pinnedContainer.querySelector(".pfx-tab-row");
     }
     updateVisibility();
-  }
-  function tabUrl(tab) {
-    if (!tab)
-      return "";
-    const spec = tab.linkedBrowser?.currentURI?.spec;
-    if (spec && spec !== "about:blank")
-      return spec;
-    if (SS) {
-      try {
-        const raw = SS.getTabState(tab);
-        if (raw) {
-          const state2 = JSON.parse(raw);
-          const entries = state2.entries;
-          if (Array.isArray(entries) && entries.length) {
-            const idx = Math.max(0, Math.min(entries.length - 1, (state2.index || 1) - 1));
-            const entryUrl = entries[idx]?.url;
-            if (entryUrl)
-              return entryUrl;
-          }
-        }
-      } catch (e) {
-        console.error("palefox-tabs: getTabState failed", e);
-      }
-    }
-    return spec || "";
   }
   function popClosedEntry(url) {
     if (!url)
@@ -2436,12 +2430,6 @@
     treeData
   }));
   var drag = makeDrag({
-    subtreeRows,
-    levelOfRow,
-    dataOf,
-    allRows,
-    treeData,
-    tabById,
     syncTabRow,
     clearSelection,
     scheduleTreeResync,

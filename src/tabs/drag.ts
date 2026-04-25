@@ -20,7 +20,15 @@ import {
   selection,
   movingTabs,
 } from "./state.ts";
-import type { Group, Row, Tab, TreeData } from "./types.ts";
+import {
+  allRows,
+  dataOf,
+  levelOfRow,
+  subtreeRows,
+  tabById,
+  treeData,
+} from "./helpers.ts";
+import type { Row, Tab } from "./types.ts";
 
 declare const gBrowser: any;
 declare const document: Document;
@@ -37,14 +45,7 @@ export type DropPosition =
   | "into-empty-panel";
 
 export type DragDeps = {
-  // Tree helpers — currently in legacy index.ts, will move when helpers.ts lands.
-  readonly subtreeRows: (row: Row) => Row[];
-  readonly levelOfRow: (row: Row) => number;
-  readonly dataOf: (row: Row) => TreeData | Group | null;
-  readonly allRows: () => Iterable<Row>;
-  readonly treeData: (tab: Tab) => TreeData;
-  readonly tabById: (id: number) => Tab | null;
-  // Row-level operations called from drag handlers.
+  // Row-level operations called from drag handlers — still in legacy.
   readonly syncTabRow: (tab: Tab) => void;
   readonly clearSelection: () => void;
   // Coalesced sync callbacks fired after a drop settles.
@@ -63,10 +64,7 @@ export type DragAPI = {
 // =============================================================================
 
 export function makeDrag(deps: DragDeps): DragAPI {
-  const {
-    subtreeRows, levelOfRow, dataOf, allRows, treeData, tabById,
-    syncTabRow, clearSelection, scheduleTreeResync, scheduleSave,
-  } = deps;
+  const { syncTabRow, clearSelection, scheduleTreeResync, scheduleSave } = deps;
 
   // Closure-private drag/drop cycle state.
   let dragSource: Row | null = null;

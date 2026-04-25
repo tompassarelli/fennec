@@ -20,6 +20,12 @@ import {
   type Snapshot,
 } from "./persist.ts";
 import { makeDrag } from "./drag.ts";
+import {
+  SS, tryRegisterPinAttr, pinTabId, readPinnedId,
+  treeData, tabById, parentOfTab, levelOf, levelOfRow, dataOf,
+  allTabs, allRows, hasChildren, subtreeRows, isHorizontal,
+  tabUrl,
+} from "./helpers.ts";
 
 const pfxLog = createLogger("tabs");
 
@@ -29,23 +35,6 @@ const pfxLog = createLogger("tabs");
 
   const sidebarMain = document.getElementById("sidebar-main");
   if (!sidebarMain) return;
-
-  // Explicit import — in some chrome-script contexts SessionStore is not
-  // exposed as a global, and try/catch around every call would silently
-  // swallow the ReferenceError and turn our id-pinning into a no-op.
-  const SS = (() => {
-    try {
-      if (typeof SessionStore !== "undefined") return SessionStore;
-    } catch {}
-    try {
-      return ChromeUtils.importESModule(
-        "resource:///modules/sessionstore/SessionStore.sys.mjs"
-      ).SessionStore;
-    } catch (e) {
-      console.error("palefox-tabs: SessionStore unavailable", e);
-      return null;
-    }
-  })();
 
   // (debug log moved to ./log.ts; pfxLog imported above)
 
@@ -79,123 +68,6 @@ const pfxLog = createLogger("tabs");
   // tab attributes via persistTabAttribute. If we can register ours there we
   // get free cross-session persistence; otherwise this is a no-op and we
   // rely on URL matching. (PIN_ATTR in ./constants.ts)
-  let pinAttrRegistered = false;
-  function tryRegisterPinAttr() {
-    if (pinAttrRegistered || !SS?.persistTabAttribute) return;
-    try { SS.persistTabAttribute(PIN_ATTR); pinAttrRegistered = true; }
-    catch (e) { console.error("palefox-tabs: persistTabAttribute failed", e); }
-  }
-  function pinTabId(tab, id) {
-    try { tab.setAttribute(PIN_ATTR, String(id)); } catch {}
-  }
-  function readPinnedId(tab) {
-    try {
-      const v = tab.getAttribute?.(PIN_ATTR);
-      if (v) { const n = Number(v); if (n) return n; }
-    } catch {}
-    return 0;
-  }
-
-  function treeData(tab) {
-    if (!treeOf.has(tab)) {
-      let id = readPinnedId(tab);
-      if (id) {
-        if (id >= state.nextTabId) state.nextTabId = id + 1;
-        pfxLog("treeData:pfxId", { pfxId: id, label: tab.label, nextTabId: state.nextTabId });
-      } else {
-        id = state.nextTabId++;
-        pinTabId(tab, id);
-        pfxLog("treeData:fresh", { id, label: tab.label, nextTabId: state.nextTabId });
-      }
-      treeOf.set(tab, {
-        id, parentId: null, name: null, state: null, collapsed: false,
-      });
-    }
-    return treeOf.get(tab);
-  }
-
-  function tabById(id) {
-    if (!id) return null;
-    for (const t of gBrowser.tabs) {
-      if (treeOf.get(t)?.id === id) return t;
-    }
-    return null;
-  }
-
-  // Depth of a tab in the tree = number of parent-chain hops to root.
-  // Guards against cycles defensively.
-  function levelOf(tab) {
-    let lv = 0, t = tab;
-    const seen = new Set();
-    while (t && !seen.has(t)) {
-      seen.add(t);
-      const pid = treeData(t).parentId;
-      if (!pid) break;
-      const p = tabById(pid);
-      if (!p) break;
-      lv++;
-      t = p;
-    }
-    return lv;
-  }
-
-  // Polymorphic level for a row: computed for tab rows, stored for groups.
-  function levelOfRow(row) {
-    if (!row) return 0;
-    if (row._group) return row._group.level || 0;
-    if (row._tab) return levelOf(row._tab);
-    return 0;
-  }
-
-  // Find a tab's current parent — direct parentId lookup.
-  function parentOfTab(tab) {
-    return tabById(treeData(tab).parentId);
-  }
-
-  // Unified data access — works for both tab rows and group rows.
-  // Note: for tab rows this returns treeData (which has parentId, not level).
-  // Use levelOfRow(row) when you need level for either kind.
-  function dataOf(row) {
-    if (row._group) return row._group;
-    if (row._tab) return treeData(row._tab);
-    return null;
-  }
-
-  // --- Helpers ---
-
-  function isHorizontal() { return state.panel?.hasAttribute("pfx-horizontal"); }
-
-  function allTabs() { return [...gBrowser.tabs]; }
-
-  // All rows (tabs + groups) in visual order
-  function allRows() {
-    const pinned = state.pinnedContainer
-      ? [...state.pinnedContainer.querySelectorAll(".pfx-tab-row")]
-      : [];
-    return [...pinned, ...state.panel.querySelectorAll(".pfx-tab-row, .pfx-group-row")];
-  }
-
-  function hasChildren(row) {
-    const next = row.nextElementSibling;
-    if (!next || next === state.spacer) return false;
-    return levelOfRow(next) > levelOfRow(row);
-  }
-
-  // Get row + all deeper rows immediately following it (level-based walk,
-  // works for mixed tab+group subtrees because levelOfRow is polymorphic).
-  function subtreeRows(row) {
-    if (!row) return [];
-    const lv = levelOfRow(row);
-    const out = [row];
-    let next = row.nextElementSibling;
-    while (next && next !== state.spacer) {
-      if (levelOfRow(next) <= lv) break;
-      out.push(next);
-      next = next.nextElementSibling;
-    }
-    return out;
-  }
-
   // --- Selection ---
 
   function clearSelection() {
@@ -469,35 +341,6 @@ const pfxLog = createLogger("tabs");
     updateVisibility();
   }
 
-  // --- Tab events ---
-
-  // Resolve a tab's URL, including pending/lazy-restored tabs whose
-  // linkedBrowser.currentURI is still about:blank because Firefox hasn't
-  // actually navigated them yet (session restore defers load until activation).
-  function tabUrl(tab) {
-    if (!tab) return "";
-    const spec = tab.linkedBrowser?.currentURI?.spec;
-    if (spec && spec !== "about:blank") return spec;
-    if (SS) {
-      try {
-        const raw = SS.getTabState(tab);
-        if (raw) {
-          const state = JSON.parse(raw);
-          const entries = state.entries;
-          if (Array.isArray(entries) && entries.length) {
-            const idx = Math.max(
-              0, Math.min(entries.length - 1, (state.index || 1) - 1)
-            );
-            const entryUrl = entries[idx]?.url;
-            if (entryUrl) return entryUrl;
-          }
-        }
-      } catch (e) {
-        console.error("palefox-tabs: getTabState failed", e);
-      }
-    }
-    return spec || "";
-  }
 
   // Pop the most-recent closed-tab entry matching this URL (LIFO).
   function popClosedEntry(url) {
@@ -2133,10 +1976,9 @@ const pfxLog = createLogger("tabs");
     treeData,
   }));
 
-  // Drag/drop — see ./drag.ts for the typed implementation. We pass tree
-  // helpers + sync callbacks here; drag manages its own private cycle state.
+  // Drag/drop — see ./drag.ts for the typed implementation. Helpers come
+  // from ./helpers.ts directly; we just pass the row-render + sync callbacks.
   const drag = makeDrag({
-    subtreeRows, levelOfRow, dataOf, allRows, treeData, tabById,
     syncTabRow, clearSelection, scheduleTreeResync, scheduleSave,
   });
 
