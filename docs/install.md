@@ -1,72 +1,141 @@
 # Installation
 
-> Please see [security considerations](../README.md#security) before installing
+> Palefox runs chrome-privileged JS and CSS in your browser. Review the
+> install scripts before piping them, and skim `chrome/JS/` once installed.
 
-## 1. Install the Sideberry Extension
+The README's [Quick Install](../README.md#quick-install) covers the common
+case (latest tagged release). This guide covers everything else: targeting
+a specific branch / tag / commit / release, manual install, dev workflows,
+and uninstall.
 
-Install [Sideberry](https://addons.mozilla.org/en-US/firefox/addon/sidebery/) from Firefox Add-ons.
+## What gets installed
 
-## 2. Install CSS
+The install script copies these files into your browser profile's `chrome/`
+directory and writes a few prefs to `user.js`:
 
-### Option A: Automated (recommended)
+| File | Owner | On update |
+|------|-------|-----------|
+| `chrome/userChrome.css` | palefox | preserved if present |
+| `chrome/user.css` | **you** | preserved (your personal tweaks) |
+| `chrome/palefox.css` | palefox | overwritten |
+| `chrome/palefox-tabs.css` | palefox | overwritten |
+| `chrome/JS/palefox-*.uc.js` | palefox | overwritten |
+| `chrome/utils/*` | palefox | overwritten (fx-autoconfig loader) |
 
-**macOS / Linux:**
+Plus, in your Firefox application directory:
+
+| File | Purpose |
+|------|---------|
+| `config.js` | fx-autoconfig bootstrap |
+| `defaults/pref/config-prefs.js` | required prefs to enable user JS |
+
+## Version targeting
+
+By default the install script grabs the latest tagged release. You can override:
+
+| Flag | What it installs |
+|------|------------------|
+| (none) | Latest tagged release (recommended) |
+| `--branch <name>` | Tip of a branch (e.g. `--branch main` for latest dev) |
+| `--tag <name>` | A specific tag (e.g. `--tag v0.36.4`) |
+| `--release <name>` | Same as `--tag`, alias for clarity |
+| `--commit <sha>` | A specific commit |
+| `--latest-commit` | Latest commit on `main` |
+
+**Examples — macOS / Linux:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tompassarelli/palefox/main/install.sh -o /tmp/palefox-install.sh && bash /tmp/palefox-install.sh
+# Latest dev (tip of main)
+curl -fsSL https://raw.githubusercontent.com/tompassarelli/palefox/main/install.sh -o /tmp/palefox-install.sh \
+  && bash /tmp/palefox-install.sh --branch main
+
+# A specific release
+bash /tmp/palefox-install.sh --release v0.36.4
+
+# A specific commit
+bash /tmp/palefox-install.sh --commit 6c9b7dd
 ```
 
-**Windows** (PowerShell):
+**Examples — Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/tompassarelli/palefox/main/install.ps1 | iex
+# Latest dev
+irm https://raw.githubusercontent.com/tompassarelli/palefox/main/install.ps1 -OutFile $env:TEMP\palefox-install.ps1
+& $env:TEMP\palefox-install.ps1 --branch main
+
+# A specific release
+& $env:TEMP\palefox-install.ps1 --release v0.36.4
 ```
 
-**LibreWolf:** add `--librewolf` to either command, or select LibreWolf when prompted interactively.
+## Other flags
 
-The script does the following:
-- Detects Firefox or LibreWolf profile directories (including Flatpak and XDG paths on Linux)
-- Copies core files (`palefox.css`) into your profile — always updated
-- Creates `userChrome.css` (entry point) and `user.css` (your customizations) if they don't exist — preserved on update
-- Writes prefs to `user.js`: disables vertical tabs, disables the sidebar revamp, enables custom stylesheets, sets `palefox.*` defaults
-- Use `--force` to overwrite all files (e.g. clean reinstall)
-- Use `--no-backup` to skip the backup
+| Flag | Effect |
+|------|--------|
+| `--librewolf` | Install into LibreWolf profile instead of Firefox |
+| `--force` | Overwrite user-customized files (`userChrome.css`, `user.css`) |
+| `--no-backup` | Skip backing up the existing `chrome/` folder before install |
+| `--help` | Show usage summary |
 
-The entry point wires everything together:
-```css
-@import url("palefox.css");
-@import url("user.css");
+When more than one Firefox / LibreWolf profile exists, the script prompts
+you to pick (interactive) or picks `*.default-release` automatically.
+
+## Manual install
+
+If you'd rather not pipe a script, the manual flow is:
+
+1. **Locate your profile.** Open `about:support` and click "Open Profile
+   Folder" under Application Basics.
+   - Flatpak: `~/.var/app/org.mozilla.firefox/.mozilla/firefox/<profile>`
+   - LibreWolf: `~/.librewolf/` or `~/.config/librewolf/librewolf/`
+2. **Enable user JS / CSS prefs.** Open `about:config`:
+   - `toolkit.legacyUserProfileCustomizations.stylesheets` → `true`
+   - `sidebar.verticalTabs` → `true`
+   - `sidebar.revamp` → `true`
+   - `sidebar.position_start` → `true`
+   - `browser.toolbars.bookmarks.visibility` → `"never"`
+3. **Copy the chrome files.** From this repo's `chrome/` directory, copy
+   into your profile's `chrome/` directory:
+   - `userChrome.css`, `palefox.css`, `palefox-tabs.css`, `user.css`
+   - The `JS/` folder
+   - The `utils/` folder (fx-autoconfig loader)
+4. **Copy the fx-autoconfig bootstrap.** From this repo's `program/`,
+   copy into your Firefox application directory (where `firefox` lives):
+   - `config.js`
+   - `defaults/pref/config-prefs.js`
+
+   *macOS:* `/Applications/Firefox.app/Contents/Resources/`
+   *Linux (typical):* `/usr/lib/firefox/` or wherever `firefox` is installed
+   *Windows:* `C:\Program Files\Mozilla Firefox\`
+
+5. **Restart the browser.**
+
+## Dev workflow (PALEFOX_LOCAL)
+
+If you're hacking on palefox locally, set `PALEFOX_LOCAL` to your repo
+checkout to install from there instead of downloading:
+
+```bash
+PALEFOX_LOCAL=/home/me/code/palefox bash install.sh
 ```
-Palefox updates `chrome/`. Your tweaks live in `chrome/`. `userChrome.css` just wires them together — advanced users can edit it to add extra imports. Toggle features in `about:config` by typing `palefox.` to see all options.
 
-### Option B: Manual
-
-**Enable required Firefox settings:**
-
-> Note: only `toolkit.legacyUserProfileCustomizations.stylesheets` requires `about:config`; the rest can be changed in Settings.
-
-1. Go to `about:config` in the address bar
-2. Set `toolkit.legacyUserProfileCustomizations.stylesheets` to `true`
-3. Set `sidebar.verticalTabs` to `false` (or turn on **Horizontal tabs** in Settings)
-4. Set `sidebar.revamp` to `false` (or turn off **Show Sidebar** in Settings)
-
-**Locate your profile directory:**
-1. Go to `about:support` in the address bar
-2. Under "Application Basics", click **Open Profile Folder**
-   - **Flatpak:** `~/.var/app/org.mozilla.firefox/.mozilla/firefox/<profile>`
-   - **LibreWolf:** `~/.librewolf/` or `~/.config/librewolf/librewolf/`
-
-**Copy the CSS files:**
-1. Inside the profile folder, create a `chrome` directory if it doesn't already exist
-2. Copy `userChrome.css`, the `palefox/` folder, and the `user/` folder from this repo's `chrome/` directory into your profile's `chrome/` directory
-3. Put your personal customizations in `user.css` — it won't be overwritten when palefox is updated
-
-## 3. Restart your browser
-
-Note: if the sidebar is invisible, you might have it toggled off. Try `Ctrl+H` to toggle history, then activate the Sideberry tabs menu from there by clicking on the extension icon.
+This skips the network fetch and skips the interactive browser prompt.
 
 ## Upgrading
 
-If you had a monolithic `userChrome.css`, the install script will back it up to `userChrome.css.legacy` and install the new modular entry point. Move personal tweaks into `user.css`.
+Re-run the install script. It backs up `chrome/` to `chrome.bak.<timestamp>`
+before overwriting (skip with `--no-backup`). Your `user.css` and
+`user.js` prefs are preserved.
+
+If you have an old monolithic `userChrome.css` from a pre-modular palefox,
+the install script saves it as `userChrome.css.legacy` and installs the
+new entry point. Move any personal tweaks from there into `user.css`.
 
 ## Uninstalling
 
-Delete the `chrome` folder and remove the Palefox lines from `user.js` in your profile directory (or delete `user.js` entirely if Palefox created it).
+1. Delete the `chrome/` folder in your profile directory.
+2. Remove the palefox lines from `user.js` (or delete `user.js` entirely
+   if palefox created it).
+3. Optionally remove `config.js` and `defaults/pref/config-prefs.js` from
+   your Firefox application directory to disable the fx-autoconfig loader.
+
+## Nix / Home Manager
+
+See [docs/nix.md](nix.md) for declarative install on Nix-based systems.
