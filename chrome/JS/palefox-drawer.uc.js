@@ -5,6 +5,730 @@
 // ==/UserScript==
 
 (() => {
+  // src/tabs/log.ts
+  var LOG_FILENAME = "palefox-debug.log";
+  var LOG_MAX_BYTES = 5 * 1024 * 1024;
+  var _logPath = null;
+  var _rotateChecked = false;
+  function logPath() {
+    if (_logPath)
+      return _logPath;
+    _logPath = PathUtils.join(Services.dirsvc.get("ProfD", Ci.nsIFile).path, LOG_FILENAME);
+    return _logPath;
+  }
+  function maybeRotate() {
+    if (_rotateChecked)
+      return;
+    _rotateChecked = true;
+    IOUtils.stat(logPath()).then((info) => {
+      if (info.size > LOG_MAX_BYTES) {
+        return IOUtils.write(logPath(), new Uint8Array(0), { mode: "overwrite" });
+      }
+    }).catch(() => {});
+  }
+  var _lines = [];
+  var _flushPending = false;
+  function flush() {
+    const batch = _lines.splice(0);
+    if (!batch.length) {
+      _flushPending = false;
+      return;
+    }
+    const blob = new TextEncoder().encode(batch.join(`
+`) + `
+`);
+    const path = logPath();
+    IOUtils.write(path, blob, { mode: "appendOrCreate" }).then(() => {
+      if (_lines.length)
+        flush();
+      else
+        _flushPending = false;
+    }).catch((e) => {
+      console.error("[PFX:log] write failed", e);
+      _flushPending = false;
+    });
+  }
+  function createLogger(tag) {
+    const consolePrefix = `[PFX:${tag}]`;
+    return (event, data = {}) => {
+      if (!Services.prefs.getBoolPref("pfx.debug", false))
+        return;
+      maybeRotate();
+      console.log(consolePrefix, event, data);
+      _lines.push(`${Date.now()} [${tag}] ${event} ${JSON.stringify(data)}`);
+      if (!_flushPending) {
+        _flushPending = true;
+        Promise.resolve().then(flush);
+      }
+    };
+  }
+
+  // src/drawer/compact.ts
+  function makeCompact(deps) {
+    const { sidebarMain, navigatorToolbox, urlbar } = deps;
+    const COMPACT_PREF = "pfx.sidebar.compact";
+    const HORIZONTAL_COMPACT_PREF = "pfx.toolbar.compact";
+    const KEEP_HOVER_DURATION = 150;
+    const OFFSCREEN_SHOW_DURATION = 1000;
+    const FLASH_DURATION = 800;
+    const COLLAPSE_PROTECTION_DURATION = 280;
+    function hoverHackDelay() {
+      return Services.prefs.getIntPref("pfx.compact.hoverHackDelay", 0);
+    }
+    const log = createLogger("compact");
+    function dbg(event, data = {}) {
+      log(event, {
+        compact: sidebarMain.hasAttribute("data-pfx-compact"),
+        compactHz: document.documentElement.hasAttribute("data-pfx-compact-horizontal"),
+        hover: sidebarMain.hasAttribute("pfx-has-hover"),
+        hoverHz: navigatorToolbox.hasAttribute("pfx-has-hover"),
+        openPopups: _openPopups,
+        flashPending: flashTimer !== null,
+        ...data
+      });
+    }
+    let hoverStrip = null;
+    let flashTimer = null;
+    let urlbarCompactObserver = null;
+    let _collapseProtectedUntil = 0;
+    let hideWatchdogTimer = null;
+    let hoverStripTop = null;
+    let _hzFlashTimer = null;
+    let urlbarCompactObserverHz = null;
+    let _collapseProtectedHzUntil = 0;
+    let hideWatchdogTimerHz = null;
+    let _ignoreNextHover = false;
+    let _openPopups = 0;
+    function _isIgnoredPopup(e) {
+      const path = e.composedPath?.();
+      const el = path?.[0] ?? e.target;
+      return el.localName === "tooltip" || el.id === "tab-preview-panel";
+    }
+    function onPopupShown(e) {
+      if (_isIgnoredPopup(e))
+        return;
+      _openPopups++;
+      const t = e.target;
+      dbg("popupshown", { id: t.id, tag: t.localName, _openPopups });
+    }
+    function onPopupHidden(e) {
+      if (_isIgnoredPopup(e))
+        return;
+      _openPopups = Math.max(0, _openPopups - 1);
+      const t = e.target;
+      dbg("popuphidden", { id: t.id, tag: t.localName, _openPopups });
+    }
+    function reconcileCounterIfStale() {
+      if (_openPopups <= 0)
+        return;
+      const live = document.querySelector("panel[panelopen='true'], panel[open='true'], " + "menupopup[state='open'], menupopup[state='showing'], " + "menupopup[open='true']");
+      if (!live) {
+        dbg("reconcileCounterIfStale:reset", { stale: _openPopups });
+        _openPopups = 0;
+      }
+    }
+    function isGuarded() {
+      if (_openPopups > 0)
+        return true;
+      if (urlbar?.hasAttribute("breakout-extend"))
+        return true;
+      if (document.querySelector("toolbarbutton[open='true']"))
+        return true;
+      if (document.querySelector(".tabbrowser-tab[multiselected]"))
+        return true;
+      if (document.querySelector("[pfx-dragging]"))
+        return true;
+      return false;
+    }
+    function setHover(value) {
+      dbg("setHover", {
+        value,
+        collapseProtectedRemaining: Math.max(0, _collapseProtectedUntil - Date.now())
+      });
+      if (value && _ignoreNextHover) {
+        sidebarMain.removeAttribute("pfx-has-hover");
+        return;
+      }
+      if (value) {
+        const collapseRemaining = _collapseProtectedUntil - Date.now();
+        if (collapseRemaining > 0) {
+          dbg("setHover:revealDropped", { collapseRemaining });
+          return;
+        }
+        sidebarMain.setAttribute("pfx-has-hover", "true");
+        return;
+      }
+      if (sidebarMain.hasAttribute("pfx-has-hover")) {
+        sidebarMain.removeAttribute("pfx-has-hover");
+        _collapseProtectedUntil = Date.now() + COLLAPSE_PROTECTION_DURATION;
+      }
+    }
+    function flashSidebar(duration) {
+      if (flashTimer) {
+        clearTimeout(flashTimer);
+        dbg("flashSidebar:extend", { duration });
+      } else {
+        dbg("flashSidebar:show", { duration });
+        requestAnimationFrame(() => setHover(true));
+      }
+      flashTimer = setTimeout(() => {
+        requestAnimationFrame(() => {
+          reconcileCounterIfStale();
+          if (isGuarded()) {
+            dbg("flashSidebar:hide-blocked");
+            scheduleHideWatchdog();
+          } else {
+            setHover(false);
+          }
+          flashTimer = null;
+        });
+      }, duration);
+    }
+    function clearFlash() {
+      if (flashTimer)
+        clearTimeout(flashTimer);
+      flashTimer = null;
+    }
+    function reconcileCompactState(trigger) {
+      if (!sidebarMain.hasAttribute("data-pfx-compact"))
+        return;
+      const before = {
+        hover: sidebarMain.hasAttribute("pfx-has-hover"),
+        flashPending: flashTimer !== null,
+        _ignoreNextHover,
+        _openPopups
+      };
+      _ignoreNextHover = false;
+      reconcileCounterIfStale();
+      const cursorOver = sidebarMain.matches(":hover") || (hoverStrip?.matches(":hover") ?? false);
+      const guarded = isGuarded();
+      if (guarded || cursorOver) {
+        if (!sidebarMain.hasAttribute("pfx-has-hover")) {
+          sidebarMain.setAttribute("pfx-has-hover", "true");
+        }
+        scheduleHideWatchdog();
+      } else if (flashTimer !== null) {
+        dbg("reconcileCompactState:flashPending");
+      } else {
+        setHover(false);
+        cancelHideWatchdog();
+      }
+      dbg("reconcileCompactState", {
+        trigger,
+        before,
+        cursorOver,
+        guarded,
+        after: {
+          hover: sidebarMain.hasAttribute("pfx-has-hover"),
+          flashPending: flashTimer !== null,
+          _ignoreNextHover
+        }
+      });
+    }
+    function scheduleHideWatchdog() {
+      if (hideWatchdogTimer)
+        return;
+      hideWatchdogTimer = setTimeout(() => {
+        hideWatchdogTimer = null;
+        reconcileCompactState("hide-watchdog-1s");
+      }, 1000);
+    }
+    function cancelHideWatchdog() {
+      if (hideWatchdogTimer) {
+        clearTimeout(hideWatchdogTimer);
+        hideWatchdogTimer = null;
+      }
+    }
+    function setToolboxHover(value) {
+      dbg("setToolboxHover", { value });
+      if (value && _ignoreNextHover) {
+        navigatorToolbox.removeAttribute("pfx-has-hover");
+        return;
+      }
+      if (value) {
+        if (Date.now() < _collapseProtectedHzUntil) {
+          dbg("setToolboxHover:revealDropped");
+          return;
+        }
+        navigatorToolbox.setAttribute("pfx-has-hover", "true");
+        return;
+      }
+      if (navigatorToolbox.hasAttribute("pfx-has-hover")) {
+        navigatorToolbox.removeAttribute("pfx-has-hover");
+        _collapseProtectedHzUntil = Date.now() + COLLAPSE_PROTECTION_DURATION;
+      }
+    }
+    function flashToolbox(duration) {
+      if (_hzFlashTimer) {
+        clearTimeout(_hzFlashTimer);
+        dbg("flashToolbox:extend", { duration });
+      } else {
+        dbg("flashToolbox:show", { duration });
+        requestAnimationFrame(() => setToolboxHover(true));
+      }
+      _hzFlashTimer = setTimeout(() => {
+        requestAnimationFrame(() => {
+          reconcileCounterIfStale();
+          if (isGuarded()) {
+            dbg("flashToolbox:hide-blocked");
+            scheduleHideWatchdogHz();
+          } else {
+            setToolboxHover(false);
+          }
+          _hzFlashTimer = null;
+        });
+      }, duration);
+    }
+    function clearFlashToolbox() {
+      if (_hzFlashTimer)
+        clearTimeout(_hzFlashTimer);
+      _hzFlashTimer = null;
+    }
+    function reconcileCompactStateHorizontal(trigger) {
+      if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal"))
+        return;
+      const before = {
+        hover: navigatorToolbox.hasAttribute("pfx-has-hover"),
+        flashPending: _hzFlashTimer !== null,
+        _ignoreNextHover,
+        _openPopups
+      };
+      _ignoreNextHover = false;
+      reconcileCounterIfStale();
+      const cursorOver = navigatorToolbox.matches(":hover") || (hoverStripTop?.matches(":hover") ?? false);
+      const guarded = isGuarded();
+      if (guarded || cursorOver) {
+        if (!navigatorToolbox.hasAttribute("pfx-has-hover")) {
+          navigatorToolbox.setAttribute("pfx-has-hover", "true");
+        }
+        scheduleHideWatchdogHz();
+      } else if (_hzFlashTimer !== null) {
+        dbg("reconcileCompactStateHorizontal:flashPending");
+      } else {
+        setToolboxHover(false);
+        cancelHideWatchdogHz();
+      }
+      dbg("reconcileCompactStateHorizontal", {
+        trigger,
+        before,
+        cursorOver,
+        guarded,
+        after: {
+          hover: navigatorToolbox.hasAttribute("pfx-has-hover"),
+          flashPending: _hzFlashTimer !== null,
+          _ignoreNextHover
+        }
+      });
+    }
+    function scheduleHideWatchdogHz() {
+      if (hideWatchdogTimerHz)
+        return;
+      hideWatchdogTimerHz = setTimeout(() => {
+        hideWatchdogTimerHz = null;
+        reconcileCompactStateHorizontal("hide-watchdog-1s-hz");
+      }, 1000);
+    }
+    function cancelHideWatchdogHz() {
+      if (hideWatchdogTimerHz) {
+        clearTimeout(hideWatchdogTimerHz);
+        hideWatchdogTimerHz = null;
+      }
+    }
+    function onSidebarEnter(event) {
+      const target = event.target;
+      const targetId = target.id || target.localName;
+      dbg("onSidebarEnter:entry", { targetId, _ignoreNextHover, flashPending: flashTimer !== null });
+      setTimeout(() => {
+        if (!target.matches(":hover")) {
+          dbg("onSidebarEnter:abort", { reason: "not-hovered-after-tick", targetId });
+          return;
+        }
+        if (target.closest("panel")) {
+          dbg("onSidebarEnter:abort", { reason: "from-panel", targetId });
+          return;
+        }
+        clearFlash();
+        requestAnimationFrame(() => {
+          if (_ignoreNextHover) {
+            dbg("onSidebarEnter:abort", { reason: "ignore-next-hover-rAF", targetId });
+            return;
+          }
+          if (sidebarMain.hasAttribute("pfx-has-hover")) {
+            dbg("onSidebarEnter:abort", { reason: "already-has-hover", targetId });
+            return;
+          }
+          dbg("onSidebarEnter:show", { targetId });
+          setHover(true);
+        });
+      }, hoverHackDelay());
+    }
+    function onSidebarLeave(event) {
+      const target = event.target;
+      const targetId = target.id || target.localName;
+      const exitedWindow = !event.relatedTarget;
+      const lingerMs = exitedWindow ? OFFSCREEN_SHOW_DURATION : KEEP_HOVER_DURATION;
+      dbg("onSidebarLeave:entry", { targetId, _ignoreNextHover, exitedWindow, lingerMs });
+      setTimeout(() => {
+        if (target.matches(":hover")) {
+          dbg("onSidebarLeave:abort", { reason: "still-hovered-after-tick", targetId });
+          return;
+        }
+        if (_ignoreNextHover) {
+          dbg("onSidebarLeave:abort", { reason: "ignore-next-hover", targetId });
+          return;
+        }
+        if (isGuarded()) {
+          dbg("onSidebarLeave:abort", { reason: "guarded", targetId });
+          return;
+        }
+        dbg("onSidebarLeave:flash", { targetId, duration: lingerMs });
+        flashSidebar(lingerMs);
+      }, hoverHackDelay());
+    }
+    function onDocMouseLeave(e) {
+      if (!sidebarMain.hasAttribute("data-pfx-compact"))
+        return;
+      if (sidebarMain.hasAttribute("pfx-has-hover"))
+        return;
+      if (_ignoreNextHover)
+        return;
+      const triggerWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--pfx-compact-trigger-width") || "8", 10);
+      const onLeft = Services.prefs.getBoolPref("sidebar.position_start", true);
+      const nearEdge = onLeft ? e.clientX <= triggerWidth * 3 : e.clientX >= window.innerWidth - triggerWidth * 3;
+      if (!nearEdge)
+        return;
+      dbg("onDocMouseLeave:show", { clientX: e.clientX, onLeft });
+      flashSidebar(OFFSCREEN_SHOW_DURATION);
+    }
+    function onToolboxEnter(event) {
+      const target = event.target;
+      setTimeout(() => {
+        if (!target.matches(":hover"))
+          return;
+        if (target.closest("panel"))
+          return;
+        clearFlashToolbox();
+        requestAnimationFrame(() => {
+          if (_ignoreNextHover)
+            return;
+          if (navigatorToolbox.hasAttribute("pfx-has-hover"))
+            return;
+          setToolboxHover(true);
+        });
+      }, hoverHackDelay());
+    }
+    function onToolboxLeave(event) {
+      const target = event.target;
+      const exitedWindow = !event.relatedTarget;
+      const lingerMs = exitedWindow ? OFFSCREEN_SHOW_DURATION : KEEP_HOVER_DURATION;
+      setTimeout(() => {
+        if (target.matches(":hover"))
+          return;
+        if (_ignoreNextHover)
+          return;
+        if (isGuarded())
+          return;
+        flashToolbox(lingerMs);
+      }, hoverHackDelay());
+    }
+    function onDocMouseLeaveTop(e) {
+      if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal"))
+        return;
+      if (navigatorToolbox.hasAttribute("pfx-has-hover"))
+        return;
+      if (_ignoreNextHover)
+        return;
+      const triggerHeight = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--pfx-compact-trigger-width") || "8", 10);
+      if (e.clientY > triggerHeight * 3)
+        return;
+      dbg("onDocMouseLeaveTop:show", { clientY: e.clientY });
+      flashToolbox(OFFSCREEN_SHOW_DURATION);
+    }
+    function compactEnable() {
+      dbg("compactEnable");
+      sidebarMain.setAttribute("data-pfx-compact", "");
+      if (urlbar && !urlbarCompactObserver) {
+        urlbar.removeAttribute("popover");
+        urlbarCompactObserver = new MutationObserver(() => {
+          if (!sidebarMain.hasAttribute("data-pfx-compact"))
+            return;
+          if (urlbar.hasAttribute("breakout-extend")) {
+            dbg("urlbar:breakout-open");
+            urlbar.setAttribute("popover", "manual");
+            if (!urlbar.matches(":popover-open"))
+              urlbar.showPopover();
+          } else {
+            dbg("urlbar:breakout-close");
+            urlbar.removeAttribute("popover");
+            if (!sidebarMain.matches(":hover")) {
+              flashSidebar(KEEP_HOVER_DURATION);
+            }
+          }
+        });
+        urlbarCompactObserver.observe(urlbar, {
+          attributes: true,
+          attributeFilter: ["breakout-extend"]
+        });
+      }
+      if (!hoverStrip || !hoverStrip.isConnected) {
+        hoverStrip = document.createXULElement("box");
+        hoverStrip.id = "pfx-hover-strip";
+        sidebarMain.parentNode.appendChild(hoverStrip);
+        hoverStrip.addEventListener("mouseenter", () => {
+          dbg("hoverStrip:mouseenter", {
+            _ignoreNextHover,
+            flashPending: flashTimer !== null,
+            hasHover: sidebarMain.hasAttribute("pfx-has-hover")
+          });
+          if (_ignoreNextHover) {
+            dbg("hoverStrip:abort", { reason: "ignore-next-hover-sync" });
+            return;
+          }
+          flashSidebar(OFFSCREEN_SHOW_DURATION);
+        });
+      }
+      sidebarMain.addEventListener("mouseover", onSidebarEnter);
+      sidebarMain.addEventListener("mouseleave", onSidebarLeave);
+      document.documentElement.addEventListener("mouseleave", onDocMouseLeave);
+    }
+    function compactDisable() {
+      dbg("compactDisable");
+      clearFlash();
+      cancelHideWatchdog();
+      sidebarMain.removeAttribute("data-pfx-compact");
+      sidebarMain.removeAttribute("pfx-has-hover");
+      urlbarCompactObserver?.disconnect();
+      urlbarCompactObserver = null;
+      if (urlbar) {
+        urlbar.setAttribute("popover", "manual");
+        if (!urlbar.matches(":popover-open"))
+          urlbar.showPopover();
+      }
+      if (hoverStrip) {
+        hoverStrip.remove();
+        hoverStrip = null;
+      }
+      sidebarMain.removeEventListener("mouseover", onSidebarEnter);
+      sidebarMain.removeEventListener("mouseleave", onSidebarLeave);
+      document.documentElement.removeEventListener("mouseleave", onDocMouseLeave);
+    }
+    function compactEnableHorizontal() {
+      if (document.documentElement.hasAttribute("data-pfx-compact-horizontal"))
+        return;
+      dbg("compactEnableHorizontal");
+      document.documentElement.setAttribute("data-pfx-compact-horizontal", "");
+      if (urlbar && !urlbarCompactObserverHz) {
+        urlbar.removeAttribute("popover");
+        urlbarCompactObserverHz = new MutationObserver(() => {
+          if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal"))
+            return;
+          if (urlbar.hasAttribute("breakout-extend")) {
+            urlbar.setAttribute("popover", "manual");
+            if (!urlbar.matches(":popover-open"))
+              urlbar.showPopover();
+          } else {
+            urlbar.removeAttribute("popover");
+          }
+        });
+        urlbarCompactObserverHz.observe(urlbar, {
+          attributes: true,
+          attributeFilter: ["breakout-extend"]
+        });
+      }
+      if (!hoverStripTop || !hoverStripTop.isConnected) {
+        hoverStripTop = document.createXULElement("box");
+        hoverStripTop.id = "pfx-hover-strip-top";
+        document.documentElement.appendChild(hoverStripTop);
+        hoverStripTop.addEventListener("mouseenter", () => {
+          if (_ignoreNextHover)
+            return;
+          flashToolbox(OFFSCREEN_SHOW_DURATION);
+        });
+      }
+      navigatorToolbox.addEventListener("mouseover", onToolboxEnter);
+      navigatorToolbox.addEventListener("mouseleave", onToolboxLeave);
+      document.documentElement.addEventListener("mouseleave", onDocMouseLeaveTop);
+    }
+    function compactDisableHorizontal() {
+      if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal"))
+        return;
+      dbg("compactDisableHorizontal");
+      clearFlashToolbox();
+      cancelHideWatchdogHz();
+      document.documentElement.removeAttribute("data-pfx-compact-horizontal");
+      navigatorToolbox.removeAttribute("pfx-has-hover");
+      urlbarCompactObserverHz?.disconnect();
+      urlbarCompactObserverHz = null;
+      if (urlbar) {
+        urlbar.setAttribute("popover", "manual");
+        if (!urlbar.matches(":popover-open"))
+          urlbar.showPopover();
+      }
+      if (hoverStripTop) {
+        hoverStripTop.remove();
+        hoverStripTop = null;
+      }
+      navigatorToolbox.removeEventListener("mouseover", onToolboxEnter);
+      navigatorToolbox.removeEventListener("mouseleave", onToolboxLeave);
+      document.documentElement.removeEventListener("mouseleave", onDocMouseLeaveTop);
+    }
+    function compactToggle() {
+      const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
+      if (vertical) {
+        const active = sidebarMain.hasAttribute("data-pfx-compact");
+        dbg("compactToggle:vertical", { wasActive: active });
+        if (active) {
+          compactDisable();
+          Services.prefs.setBoolPref(COMPACT_PREF, false);
+        } else {
+          _ignoreNextHover = true;
+          compactEnable();
+          Services.prefs.setBoolPref(COMPACT_PREF, true);
+          const safetyTimer = setTimeout(() => reconcileCompactState("safety-timer-400ms"), 400);
+          sidebarMain.addEventListener("transitionend", function onTransitionEnd(e) {
+            if (e.target !== sidebarMain || e.propertyName !== "transform")
+              return;
+            sidebarMain.removeEventListener("transitionend", onTransitionEnd);
+            clearTimeout(safetyTimer);
+            reconcileCompactState("transitionend-transform");
+          });
+        }
+      } else {
+        const active = document.documentElement.hasAttribute("data-pfx-compact-horizontal");
+        dbg("compactToggle:horizontal", { wasActive: active });
+        if (active) {
+          compactDisableHorizontal();
+          Services.prefs.setBoolPref(HORIZONTAL_COMPACT_PREF, false);
+        } else {
+          _ignoreNextHover = true;
+          compactEnableHorizontal();
+          Services.prefs.setBoolPref(HORIZONTAL_COMPACT_PREF, true);
+          const safetyTimer = setTimeout(() => reconcileCompactStateHorizontal("safety-timer-400ms-hz"), 400);
+          navigatorToolbox.addEventListener("transitionend", function onTransitionEnd(e) {
+            if (e.target !== navigatorToolbox || e.propertyName !== "transform")
+              return;
+            navigatorToolbox.removeEventListener("transitionend", onTransitionEnd);
+            clearTimeout(safetyTimer);
+            reconcileCompactStateHorizontal("transitionend-transform-hz");
+          });
+        }
+      }
+    }
+    function applyCompactForCurrentMode() {
+      const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
+      if (vertical) {
+        if (Services.prefs.getBoolPref(COMPACT_PREF, false) && !sidebarMain.hasAttribute("data-pfx-compact")) {
+          compactEnable();
+        }
+      } else {
+        if (Services.prefs.getBoolPref(HORIZONTAL_COMPACT_PREF, false) && !document.documentElement.hasAttribute("data-pfx-compact-horizontal")) {
+          compactEnableHorizontal();
+        }
+      }
+    }
+    const compactObserver = {
+      observe() {
+        const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
+        if (!vertical)
+          return;
+        const enabled = Services.prefs.getBoolPref(COMPACT_PREF, false);
+        const active = sidebarMain.hasAttribute("data-pfx-compact");
+        if (enabled && !active)
+          compactEnable();
+        else if (!enabled && active)
+          compactDisable();
+      }
+    };
+    const compactObserverHz = {
+      observe() {
+        const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
+        if (vertical)
+          return;
+        const enabled = Services.prefs.getBoolPref(HORIZONTAL_COMPACT_PREF, false);
+        const active = document.documentElement.hasAttribute("data-pfx-compact-horizontal");
+        if (enabled && !active)
+          compactEnableHorizontal();
+        else if (!enabled && active)
+          compactDisableHorizontal();
+      }
+    };
+    const verticalTabsObserver = {
+      observe() {
+        const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
+        dbg("verticalTabs:change", { vertical });
+        if (vertical)
+          compactDisableHorizontal();
+        else
+          compactDisable();
+        applyCompactForCurrentMode();
+      }
+    };
+    function onPfxDismiss() {
+      _ignoreNextHover = true;
+      setHover(false);
+      clearFlash();
+      setTimeout(() => {
+        _ignoreNextHover = false;
+      }, KEEP_HOVER_DURATION + 100);
+    }
+    function onPfxFlash() {
+      if (!sidebarMain.hasAttribute("data-pfx-compact"))
+        return;
+      flashSidebar(FLASH_DURATION);
+    }
+    function onSizemodeChange() {
+      reconcileCompactState("sizemodechange");
+    }
+    function onWindowBlur(e) {
+      if (e.target !== window)
+        return;
+      reconcileCompactState("window-blur");
+    }
+    document.addEventListener("popupshown", onPopupShown);
+    document.addEventListener("popuphidden", onPopupHidden);
+    sidebarMain.addEventListener("pfx-dismiss", onPfxDismiss);
+    sidebarMain.addEventListener("pfx-flash", onPfxFlash);
+    window.addEventListener("sizemodechange", onSizemodeChange);
+    window.addEventListener("blur", onWindowBlur);
+    Services.prefs.addObserver(COMPACT_PREF, compactObserver);
+    Services.prefs.addObserver(HORIZONTAL_COMPACT_PREF, compactObserverHz);
+    Services.prefs.addObserver("sidebar.verticalTabs", verticalTabsObserver);
+    applyCompactForCurrentMode();
+    function pinSidebar() {
+      sidebarMain.setAttribute("pfx-has-hover", "true");
+      clearFlash();
+    }
+    function pinToolbox() {
+      navigatorToolbox.setAttribute("pfx-has-hover", "true");
+      clearFlashToolbox();
+    }
+    function destroy() {
+      document.removeEventListener("popupshown", onPopupShown);
+      document.removeEventListener("popuphidden", onPopupHidden);
+      sidebarMain.removeEventListener("pfx-dismiss", onPfxDismiss);
+      sidebarMain.removeEventListener("pfx-flash", onPfxFlash);
+      window.removeEventListener("sizemodechange", onSizemodeChange);
+      window.removeEventListener("blur", onWindowBlur);
+      Services.prefs.removeObserver(COMPACT_PREF, compactObserver);
+      Services.prefs.removeObserver(HORIZONTAL_COMPACT_PREF, compactObserverHz);
+      Services.prefs.removeObserver("sidebar.verticalTabs", verticalTabsObserver);
+      cancelHideWatchdog();
+      cancelHideWatchdogHz();
+      clearFlash();
+      clearFlashToolbox();
+    }
+    return {
+      toggle: compactToggle,
+      reconcile: reconcileCompactState,
+      reconcileHorizontal: reconcileCompactStateHorizontal,
+      pinSidebar,
+      pinToolbox,
+      isCompactVertical: () => sidebarMain.hasAttribute("data-pfx-compact"),
+      isCompactHorizontal: () => document.documentElement.hasAttribute("data-pfx-compact-horizontal"),
+      destroy
+    };
+  }
+
   // src/drawer/index.ts
   function init() {
     const sidebarMain = document.getElementById("sidebar-main");
@@ -190,666 +914,24 @@
       attributes: true,
       attributeFilter: ["sidebar-launcher-expanded"]
     });
-    const COMPACT_PREF = "pfx.sidebar.compact";
-    const HORIZONTAL_COMPACT_PREF = "pfx.toolbar.compact";
-    const DEBUG_PREF = "pfx.debug";
-    const KEEP_HOVER_DURATION = 150;
-    function hoverHackDelay() {
-      return Services.prefs.getIntPref("pfx.compact.hoverHackDelay", 0);
-    }
-    const OFFSCREEN_SHOW_DURATION = 1000;
-    const COLLAPSE_PROTECTION_DURATION = 280;
-    let _collapseProtectedUntil = 0;
-    let _collapseProtectedHzUntil = 0;
-    let hoverStripTop = null;
-    let urlbarCompactObserverHz = null;
-    let _hzFlashTimer = null;
-    const FLASH_DURATION = 800;
-    let _logPath = null;
-    const _logLines = [];
-    let _logFlushPending = false;
-    function _logFlush() {
-      const batch = _logLines.splice(0);
-      if (!batch.length) {
-        _logFlushPending = false;
-        return;
-      }
-      if (!_logPath) {
-        _logPath = PathUtils.join(Services.dirsvc.get("ProfD", Ci.nsIFile).path, "palefox-debug.log");
-      }
-      const blob = new TextEncoder().encode(batch.join(`
-`) + `
-`);
-      IOUtils.write(_logPath, blob, { mode: "appendOrCreate" }).then(() => {
-        if (_logLines.length)
-          _logFlush();
-        else
-          _logFlushPending = false;
-      }).catch((e) => {
-        console.error("[PFX:drawer] log write failed", e);
-        _logFlushPending = false;
-      });
-    }
-    function dbg(event, data = {}) {
-      if (!Services.prefs.getBoolPref(DEBUG_PREF, false))
-        return;
-      const payload = {
-        compact: sidebarMain.hasAttribute("data-pfx-compact"),
-        hover: sidebarMain.hasAttribute("pfx-has-hover"),
-        openPopups: _openPopups,
-        flashPending: flashTimer !== null,
-        ...data
-      };
-      console.log("[PFX:drawer]", event, payload);
-      _logLines.push(`${Date.now()} [drawer] ${event} ${JSON.stringify(payload)}`);
-      if (!_logFlushPending) {
-        _logFlushPending = true;
-        Promise.resolve().then(_logFlush);
-      }
-    }
-    let hoverStrip = null;
-    let flashTimer = null;
-    let urlbarCompactObserver = null;
-    let _ignoreNextHover = false;
-    sidebarMain.addEventListener("pfx-dismiss", () => {
-      _ignoreNextHover = true;
-      setHover(false);
-      clearFlash();
-      setTimeout(() => {
-        _ignoreNextHover = false;
-      }, KEEP_HOVER_DURATION + 100);
+    const compact = makeCompact({
+      sidebarMain,
+      navigatorToolbox,
+      urlbar
     });
-    sidebarMain.addEventListener("pfx-flash", () => {
-      if (!sidebarMain.hasAttribute("data-pfx-compact"))
-        return;
-      flashSidebar(FLASH_DURATION);
-    });
-    let _openPopups = 0;
-    function _isIgnoredPopup(e) {
-      const el = e.composedPath?.()[0] ?? e.target;
-      return el.localName === "tooltip" || el.id === "tab-preview-panel";
-    }
-    document.addEventListener("popupshown", (e) => {
-      if (_isIgnoredPopup(e))
-        return;
-      _openPopups++;
-      dbg("popupshown", { id: e.target.id, tag: e.target.localName, _openPopups });
-    });
-    document.addEventListener("popuphidden", (e) => {
-      if (_isIgnoredPopup(e))
-        return;
-      _openPopups = Math.max(0, _openPopups - 1);
-      dbg("popuphidden", { id: e.target.id, tag: e.target.localName, _openPopups });
-    });
-    function reconcileCounterIfStale() {
-      if (_openPopups <= 0)
-        return;
-      const live = document.querySelector("panel[panelopen='true'], panel[open='true'], " + "menupopup[state='open'], menupopup[state='showing'], " + "menupopup[open='true']");
-      if (!live) {
-        dbg("reconcileCounterIfStale:reset", { stale: _openPopups });
-        _openPopups = 0;
-      }
-    }
-    function isGuarded() {
-      if (_openPopups > 0)
-        return true;
-      if (urlbar?.hasAttribute("breakout-extend"))
-        return true;
-      if (document.querySelector("toolbarbutton[open='true']"))
-        return true;
-      if (document.querySelector(".tabbrowser-tab[multiselected]"))
-        return true;
-      if (document.querySelector("[pfx-dragging]"))
-        return true;
-      return false;
-    }
-    function reconcileCompactState(trigger) {
-      if (!sidebarMain.hasAttribute("data-pfx-compact"))
-        return;
-      const before = {
-        hover: sidebarMain.hasAttribute("pfx-has-hover"),
-        flashPending: flashTimer !== null,
-        _ignoreNextHover,
-        _openPopups
-      };
-      _ignoreNextHover = false;
-      reconcileCounterIfStale();
-      const cursorOver = sidebarMain.matches(":hover") || hoverStrip?.matches(":hover");
-      const guarded = isGuarded();
-      if (guarded || cursorOver) {
-        if (!sidebarMain.hasAttribute("pfx-has-hover")) {
-          sidebarMain.setAttribute("pfx-has-hover", "true");
-        }
-        scheduleHideWatchdog();
-      } else if (flashTimer !== null) {
-        dbg("reconcileCompactState:flashPending");
-      } else {
-        setHover(false);
-        cancelHideWatchdog();
-      }
-      dbg("reconcileCompactState", {
-        trigger,
-        before,
-        cursorOver,
-        guarded,
-        after: {
-          hover: sidebarMain.hasAttribute("pfx-has-hover"),
-          flashPending: flashTimer !== null,
-          _ignoreNextHover
-        }
-      });
-    }
-    let hideWatchdogTimer = null;
-    function scheduleHideWatchdog() {
-      if (hideWatchdogTimer)
-        return;
-      hideWatchdogTimer = setTimeout(() => {
-        hideWatchdogTimer = null;
-        reconcileCompactState("hide-watchdog-1s");
-      }, 1000);
-    }
-    function cancelHideWatchdog() {
-      if (hideWatchdogTimer) {
-        clearTimeout(hideWatchdogTimer);
-        hideWatchdogTimer = null;
-      }
-    }
-    function setHover(value) {
-      dbg("setHover", {
-        value,
-        collapseProtectedRemaining: Math.max(0, _collapseProtectedUntil - Date.now())
-      });
-      if (value && _ignoreNextHover) {
-        sidebarMain.removeAttribute("pfx-has-hover");
-        return;
-      }
-      if (value) {
-        const collapseRemaining = _collapseProtectedUntil - Date.now();
-        if (collapseRemaining > 0) {
-          dbg("setHover:revealDropped", { collapseRemaining });
-          return;
-        }
-        sidebarMain.setAttribute("pfx-has-hover", "true");
-        return;
-      }
-      if (sidebarMain.hasAttribute("pfx-has-hover")) {
-        sidebarMain.removeAttribute("pfx-has-hover");
-        _collapseProtectedUntil = Date.now() + COLLAPSE_PROTECTION_DURATION;
-      }
-    }
-    function flashSidebar(duration) {
-      if (flashTimer) {
-        clearTimeout(flashTimer);
-        dbg("flashSidebar:extend", { duration });
-      } else {
-        dbg("flashSidebar:show", { duration });
-        requestAnimationFrame(() => setHover(true));
-      }
-      flashTimer = setTimeout(() => {
-        requestAnimationFrame(() => {
-          reconcileCounterIfStale();
-          if (isGuarded()) {
-            dbg("flashSidebar:hide-blocked");
-            scheduleHideWatchdog();
-          } else {
-            setHover(false);
-          }
-          flashTimer = null;
-        });
-      }, duration);
-    }
-    function clearFlash() {
-      clearTimeout(flashTimer);
-      flashTimer = null;
-    }
-    function onSidebarEnter(event) {
-      const targetId = event.target?.id || event.target?.localName;
-      dbg("onSidebarEnter:entry", { targetId, _ignoreNextHover, flashPending: flashTimer !== null });
-      setTimeout(() => {
-        if (!event.target.matches(":hover")) {
-          dbg("onSidebarEnter:abort", { reason: "not-hovered-after-tick", targetId });
-          return;
-        }
-        if (event.target.closest("panel")) {
-          dbg("onSidebarEnter:abort", { reason: "from-panel", targetId });
-          return;
-        }
-        clearFlash();
-        requestAnimationFrame(() => {
-          if (_ignoreNextHover) {
-            dbg("onSidebarEnter:abort", { reason: "ignore-next-hover-rAF", targetId });
-            return;
-          }
-          if (sidebarMain.hasAttribute("pfx-has-hover")) {
-            dbg("onSidebarEnter:abort", { reason: "already-has-hover", targetId });
-            return;
-          }
-          dbg("onSidebarEnter:show", { targetId });
-          setHover(true);
-        });
-      }, hoverHackDelay());
-    }
-    function onSidebarLeave(event) {
-      const targetId = event.target?.id || event.target?.localName;
-      const exitedWindow = !event.relatedTarget;
-      const lingerMs = exitedWindow ? OFFSCREEN_SHOW_DURATION : KEEP_HOVER_DURATION;
-      dbg("onSidebarLeave:entry", { targetId, _ignoreNextHover, exitedWindow, lingerMs });
-      setTimeout(() => {
-        if (event.target.matches(":hover")) {
-          dbg("onSidebarLeave:abort", { reason: "still-hovered-after-tick", targetId });
-          return;
-        }
-        if (_ignoreNextHover) {
-          dbg("onSidebarLeave:abort", { reason: "ignore-next-hover", targetId });
-          return;
-        }
-        if (isGuarded()) {
-          dbg("onSidebarLeave:abort", { reason: "guarded", targetId });
-          return;
-        }
-        dbg("onSidebarLeave:flash", { targetId, duration: lingerMs });
-        flashSidebar(lingerMs);
-      }, hoverHackDelay());
-    }
-    function compactEnable() {
-      dbg("compactEnable");
-      sidebarMain.setAttribute("data-pfx-compact", "");
-      if (urlbar && !urlbarCompactObserver) {
-        urlbar.removeAttribute("popover");
-        urlbarCompactObserver = new MutationObserver(() => {
-          if (!sidebarMain.hasAttribute("data-pfx-compact"))
-            return;
-          if (urlbar.hasAttribute("breakout-extend")) {
-            dbg("urlbar:breakout-open");
-            urlbar.setAttribute("popover", "manual");
-            if (!urlbar.matches(":popover-open"))
-              urlbar.showPopover();
-          } else {
-            dbg("urlbar:breakout-close");
-            urlbar.removeAttribute("popover");
-            if (!sidebarMain.matches(":hover")) {
-              flashSidebar(KEEP_HOVER_DURATION);
-            }
-          }
-        });
-        urlbarCompactObserver.observe(urlbar, { attributes: true, attributeFilter: ["breakout-extend"] });
-      }
-      if (!hoverStrip || !hoverStrip.isConnected) {
-        hoverStrip = document.createXULElement("box");
-        hoverStrip.id = "pfx-hover-strip";
-        sidebarMain.parentNode.appendChild(hoverStrip);
-        hoverStrip.addEventListener("mouseenter", () => {
-          dbg("hoverStrip:mouseenter", {
-            _ignoreNextHover,
-            flashPending: flashTimer !== null,
-            hasHover: sidebarMain.hasAttribute("pfx-has-hover")
-          });
-          if (_ignoreNextHover) {
-            dbg("hoverStrip:abort", { reason: "ignore-next-hover-sync" });
-            return;
-          }
-          flashSidebar(OFFSCREEN_SHOW_DURATION);
-        });
-      }
-      sidebarMain.addEventListener("mouseover", onSidebarEnter);
-      sidebarMain.addEventListener("mouseleave", onSidebarLeave);
-      document.documentElement.addEventListener("mouseleave", onDocMouseLeave);
-    }
-    function onDocMouseLeave(e) {
-      if (!sidebarMain.hasAttribute("data-pfx-compact"))
-        return;
-      if (sidebarMain.hasAttribute("pfx-has-hover"))
-        return;
-      if (_ignoreNextHover)
-        return;
-      const triggerWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--pfx-compact-trigger-width") || "8", 10);
-      const onLeft = Services.prefs.getBoolPref("sidebar.position_start", true);
-      const nearEdge = onLeft ? e.clientX <= triggerWidth * 3 : e.clientX >= window.innerWidth - triggerWidth * 3;
-      if (!nearEdge)
-        return;
-      dbg("onDocMouseLeave:show", { clientX: e.clientX, onLeft });
-      flashSidebar(OFFSCREEN_SHOW_DURATION);
-    }
-    function compactDisable() {
-      dbg("compactDisable");
-      clearFlash();
-      cancelHideWatchdog();
-      sidebarMain.removeAttribute("data-pfx-compact");
-      sidebarMain.removeAttribute("pfx-has-hover");
-      urlbarCompactObserver?.disconnect();
-      urlbarCompactObserver = null;
-      if (urlbar) {
-        urlbar.setAttribute("popover", "manual");
-        if (!urlbar.matches(":popover-open"))
-          urlbar.showPopover();
-      }
-      if (hoverStrip) {
-        hoverStrip.remove();
-        hoverStrip = null;
-      }
-      sidebarMain.removeEventListener("mouseover", onSidebarEnter);
-      sidebarMain.removeEventListener("mouseleave", onSidebarLeave);
-      document.documentElement.removeEventListener("mouseleave", onDocMouseLeave);
-    }
-    function setToolboxHover(value) {
-      dbg("setToolboxHover", { value });
-      if (value && _ignoreNextHover) {
-        navigatorToolbox.removeAttribute("pfx-has-hover");
-        return;
-      }
-      if (value) {
-        if (Date.now() < _collapseProtectedHzUntil) {
-          dbg("setToolboxHover:revealDropped");
-          return;
-        }
-        navigatorToolbox.setAttribute("pfx-has-hover", "true");
-        return;
-      }
-      if (navigatorToolbox.hasAttribute("pfx-has-hover")) {
-        navigatorToolbox.removeAttribute("pfx-has-hover");
-        _collapseProtectedHzUntil = Date.now() + COLLAPSE_PROTECTION_DURATION;
-      }
-    }
-    function flashToolbox(duration) {
-      if (_hzFlashTimer) {
-        clearTimeout(_hzFlashTimer);
-        dbg("flashToolbox:extend", { duration });
-      } else {
-        dbg("flashToolbox:show", { duration });
-        requestAnimationFrame(() => setToolboxHover(true));
-      }
-      _hzFlashTimer = setTimeout(() => {
-        requestAnimationFrame(() => {
-          reconcileCounterIfStale();
-          if (isGuarded()) {
-            dbg("flashToolbox:hide-blocked");
-            scheduleHideWatchdogHz();
-          } else {
-            setToolboxHover(false);
-          }
-          _hzFlashTimer = null;
-        });
-      }, duration);
-    }
-    function clearFlashToolbox() {
-      if (_hzFlashTimer)
-        clearTimeout(_hzFlashTimer);
-      _hzFlashTimer = null;
-    }
-    function reconcileCompactStateHorizontal(trigger) {
-      if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal"))
-        return;
-      const before = {
-        hover: navigatorToolbox.hasAttribute("pfx-has-hover"),
-        flashPending: _hzFlashTimer !== null,
-        _ignoreNextHover,
-        _openPopups
-      };
-      _ignoreNextHover = false;
-      reconcileCounterIfStale();
-      const cursorOver = navigatorToolbox.matches(":hover") || hoverStripTop?.matches(":hover");
-      const guarded = isGuarded();
-      if (guarded || cursorOver) {
-        if (!navigatorToolbox.hasAttribute("pfx-has-hover")) {
-          navigatorToolbox.setAttribute("pfx-has-hover", "true");
-        }
-        scheduleHideWatchdogHz();
-      } else if (_hzFlashTimer !== null) {
-        dbg("reconcileCompactStateHorizontal:flashPending");
-      } else {
-        setToolboxHover(false);
-        cancelHideWatchdogHz();
-      }
-      dbg("reconcileCompactStateHorizontal", {
-        trigger,
-        before,
-        cursorOver,
-        guarded,
-        after: {
-          hover: navigatorToolbox.hasAttribute("pfx-has-hover"),
-          flashPending: _hzFlashTimer !== null,
-          _ignoreNextHover
-        }
-      });
-    }
-    let hideWatchdogTimerHz = null;
-    function scheduleHideWatchdogHz() {
-      if (hideWatchdogTimerHz)
-        return;
-      hideWatchdogTimerHz = setTimeout(() => {
-        hideWatchdogTimerHz = null;
-        reconcileCompactStateHorizontal("hide-watchdog-1s-hz");
-      }, 1000);
-    }
-    function cancelHideWatchdogHz() {
-      if (hideWatchdogTimerHz) {
-        clearTimeout(hideWatchdogTimerHz);
-        hideWatchdogTimerHz = null;
-      }
-    }
-    function onToolboxEnter(event) {
-      setTimeout(() => {
-        if (!event.target.matches(":hover"))
-          return;
-        if (event.target.closest("panel"))
-          return;
-        clearFlashToolbox();
-        requestAnimationFrame(() => {
-          if (_ignoreNextHover)
-            return;
-          if (navigatorToolbox.hasAttribute("pfx-has-hover"))
-            return;
-          setToolboxHover(true);
-        });
-      }, hoverHackDelay());
-    }
-    function onToolboxLeave(event) {
-      const exitedWindow = !event.relatedTarget;
-      const lingerMs = exitedWindow ? OFFSCREEN_SHOW_DURATION : KEEP_HOVER_DURATION;
-      setTimeout(() => {
-        if (event.target.matches(":hover"))
-          return;
-        if (_ignoreNextHover)
-          return;
-        if (isGuarded())
-          return;
-        flashToolbox(lingerMs);
-      }, hoverHackDelay());
-    }
-    function onDocMouseLeaveTop(e) {
-      if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal"))
-        return;
-      if (navigatorToolbox.hasAttribute("pfx-has-hover"))
-        return;
-      if (_ignoreNextHover)
-        return;
-      const triggerHeight = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--pfx-compact-trigger-width") || "8", 10);
-      if (e.clientY > triggerHeight * 3)
-        return;
-      dbg("onDocMouseLeaveTop:show", { clientY: e.clientY });
-      flashToolbox(OFFSCREEN_SHOW_DURATION);
-    }
-    function compactEnableHorizontal() {
-      if (document.documentElement.hasAttribute("data-pfx-compact-horizontal"))
-        return;
-      dbg("compactEnableHorizontal");
-      document.documentElement.setAttribute("data-pfx-compact-horizontal", "");
-      if (urlbar && !urlbarCompactObserverHz) {
-        urlbar.removeAttribute("popover");
-        urlbarCompactObserverHz = new MutationObserver(() => {
-          if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal"))
-            return;
-          if (urlbar.hasAttribute("breakout-extend")) {
-            urlbar.setAttribute("popover", "manual");
-            if (!urlbar.matches(":popover-open"))
-              urlbar.showPopover();
-          } else {
-            urlbar.removeAttribute("popover");
-          }
-        });
-        urlbarCompactObserverHz.observe(urlbar, { attributes: true, attributeFilter: ["breakout-extend"] });
-      }
-      if (!hoverStripTop || !hoverStripTop.isConnected) {
-        hoverStripTop = document.createXULElement("box");
-        hoverStripTop.id = "pfx-hover-strip-top";
-        document.documentElement.appendChild(hoverStripTop);
-        hoverStripTop.addEventListener("mouseenter", () => {
-          if (_ignoreNextHover)
-            return;
-          flashToolbox(OFFSCREEN_SHOW_DURATION);
-        });
-      }
-      navigatorToolbox.addEventListener("mouseover", onToolboxEnter);
-      navigatorToolbox.addEventListener("mouseleave", onToolboxLeave);
-      document.documentElement.addEventListener("mouseleave", onDocMouseLeaveTop);
-    }
-    function compactDisableHorizontal() {
-      if (!document.documentElement.hasAttribute("data-pfx-compact-horizontal"))
-        return;
-      dbg("compactDisableHorizontal");
-      clearFlashToolbox();
-      cancelHideWatchdogHz();
-      document.documentElement.removeAttribute("data-pfx-compact-horizontal");
-      navigatorToolbox.removeAttribute("pfx-has-hover");
-      urlbarCompactObserverHz?.disconnect();
-      urlbarCompactObserverHz = null;
-      if (urlbar) {
-        urlbar.setAttribute("popover", "manual");
-        if (!urlbar.matches(":popover-open"))
-          urlbar.showPopover();
-      }
-      if (hoverStripTop) {
-        hoverStripTop.remove();
-        hoverStripTop = null;
-      }
-      navigatorToolbox.removeEventListener("mouseover", onToolboxEnter);
-      navigatorToolbox.removeEventListener("mouseleave", onToolboxLeave);
-      document.documentElement.removeEventListener("mouseleave", onDocMouseLeaveTop);
-    }
-    function compactToggle() {
-      const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
-      if (vertical) {
-        const active = sidebarMain.hasAttribute("data-pfx-compact");
-        dbg("compactToggle:vertical", { wasActive: active });
-        if (active) {
-          compactDisable();
-          Services.prefs.setBoolPref(COMPACT_PREF, false);
-        } else {
-          _ignoreNextHover = true;
-          compactEnable();
-          Services.prefs.setBoolPref(COMPACT_PREF, true);
-          const safetyTimer = setTimeout(() => reconcileCompactState("safety-timer-400ms"), 400);
-          sidebarMain.addEventListener("transitionend", function onTransitionEnd(e) {
-            if (e.target !== sidebarMain || e.propertyName !== "transform")
-              return;
-            sidebarMain.removeEventListener("transitionend", onTransitionEnd);
-            clearTimeout(safetyTimer);
-            reconcileCompactState("transitionend-transform");
-          });
-        }
-      } else {
-        const active = document.documentElement.hasAttribute("data-pfx-compact-horizontal");
-        dbg("compactToggle:horizontal", { wasActive: active });
-        if (active) {
-          compactDisableHorizontal();
-          Services.prefs.setBoolPref(HORIZONTAL_COMPACT_PREF, false);
-        } else {
-          _ignoreNextHover = true;
-          compactEnableHorizontal();
-          Services.prefs.setBoolPref(HORIZONTAL_COMPACT_PREF, true);
-          const safetyTimer = setTimeout(() => reconcileCompactStateHorizontal("safety-timer-400ms-hz"), 400);
-          navigatorToolbox.addEventListener("transitionend", function onTransitionEnd(e) {
-            if (e.target !== navigatorToolbox || e.propertyName !== "transform")
-              return;
-            navigatorToolbox.removeEventListener("transitionend", onTransitionEnd);
-            clearTimeout(safetyTimer);
-            reconcileCompactStateHorizontal("transitionend-transform-hz");
-          });
-        }
-      }
-    }
-    function applyCompactForCurrentMode() {
-      const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
-      if (vertical) {
-        if (Services.prefs.getBoolPref(COMPACT_PREF, false) && !sidebarMain.hasAttribute("data-pfx-compact")) {
-          compactEnable();
-        }
-      } else {
-        if (Services.prefs.getBoolPref(HORIZONTAL_COMPACT_PREF, false) && !document.documentElement.hasAttribute("data-pfx-compact-horizontal")) {
-          compactEnableHorizontal();
-        }
-      }
-    }
-    applyCompactForCurrentMode();
-    const compactObserver = {
-      observe() {
-        const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
-        if (!vertical)
-          return;
-        const enabled = Services.prefs.getBoolPref(COMPACT_PREF, false);
-        const active = sidebarMain.hasAttribute("data-pfx-compact");
-        if (enabled && !active)
-          compactEnable();
-        else if (!enabled && active)
-          compactDisable();
-      }
-    };
-    Services.prefs.addObserver(COMPACT_PREF, compactObserver);
-    const compactObserverHz = {
-      observe() {
-        const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
-        if (vertical)
-          return;
-        const enabled = Services.prefs.getBoolPref(HORIZONTAL_COMPACT_PREF, false);
-        const active = document.documentElement.hasAttribute("data-pfx-compact-horizontal");
-        if (enabled && !active)
-          compactEnableHorizontal();
-        else if (!enabled && active)
-          compactDisableHorizontal();
-      }
-    };
-    Services.prefs.addObserver(HORIZONTAL_COMPACT_PREF, compactObserverHz);
-    const verticalTabsObserver = {
-      observe() {
-        const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
-        dbg("verticalTabs:change", { vertical });
-        if (vertical) {
-          compactDisableHorizontal();
-        } else {
-          compactDisable();
-        }
-        applyCompactForCurrentMode();
-      }
-    };
-    Services.prefs.addObserver("sidebar.verticalTabs", verticalTabsObserver);
     window.addEventListener("unload", () => {
       Services.prefs.removeObserver(DRAGGABLE_PREF, draggableObserver);
-      Services.prefs.removeObserver(COMPACT_PREF, compactObserver);
-      Services.prefs.removeObserver(HORIZONTAL_COMPACT_PREF, compactObserverHz);
-      Services.prefs.removeObserver("sidebar.verticalTabs", verticalTabsObserver);
-      cancelHideWatchdog();
-      cancelHideWatchdogHz();
-      clearFlash();
-      clearFlashToolbox();
+      compact.destroy();
     }, { once: true });
-    window.addEventListener("sizemodechange", () => {
-      reconcileCompactState("sizemodechange");
-    });
-    window.addEventListener("blur", (e) => {
-      if (e.target !== window)
-        return;
-      reconcileCompactState("window-blur");
-    });
     const sidebarButton = document.getElementById("sidebar-button");
     if (sidebarButton) {
-      let mi2 = function(id, label, onCommand) {
+      let mi = function(id, label, onCommand) {
         const item = document.createXULElement("menuitem");
         item.id = id;
         item.setAttribute("label", label);
         item.addEventListener("command", onCommand);
         return item;
       };
-      var mi = mi2;
       const ogIcon = sidebarButton.querySelector(".toolbarbutton-icon");
       const ogIconStyle = ogIcon ? getComputedStyle(ogIcon).listStyleImage : null;
       sidebarButton.style.display = "none";
@@ -875,13 +957,12 @@
       pfxButton.addEventListener("click", (e) => {
         if (e.button !== 0)
           return;
-        compactToggle();
+        compact.toggle();
       });
       const pfxMenu = document.createXULElement("menupopup");
       pfxMenu.id = "pfx-sidebar-button-menu";
-      const compactItem = mi2("pfx-toggle-compact", "Enable Compact", () => compactToggle());
-      const collapseItem = mi2("pfx-collapse-layout", "Collapse Layout", () => {
-        dbg("collapseItem:command");
+      const compactItem = mi("pfx-toggle-compact", "Enable Compact", () => compact.toggle());
+      const collapseItem = mi("pfx-collapse-layout", "Collapse Layout", () => {
         try {
           const prevDisplay = sidebarButton.style.display;
           sidebarButton.style.display = "";
@@ -891,8 +972,7 @@
           console.error("[PFX:drawer] collapse layout failed", e);
         }
       });
-      const sidebarItem = mi2("pfx-toggle-sidebar", "Enable Sidebar", () => {
-        dbg("sidebarItem:command");
+      const sidebarItem = mi("pfx-toggle-sidebar", "Enable Sidebar", () => {
         try {
           const win = window;
           if (win.SidebarController?.toggle) {
@@ -913,11 +993,11 @@
           console.error("[PFX:drawer] sidebar toggle failed", e);
         }
       });
-      const layoutItem = mi2("pfx-toggle-tab-layout", "Horizontal Tabs", () => {
+      const layoutItem = mi("pfx-toggle-tab-layout", "Horizontal Tabs", () => {
         const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
         Services.prefs.setBoolPref("sidebar.verticalTabs", !vertical);
       });
-      const customizeItem = mi2("pfx-customize-sidebar", "Customize Sidebar", () => {
+      const customizeItem = mi("pfx-customize-sidebar", "Customize Sidebar", () => {
         try {
           const native = document.getElementById("toolbar-context-customize-sidebar");
           native?.doCommand?.() ?? native?.click?.();
@@ -931,9 +1011,7 @@
       pfxButton.setAttribute("context", "pfx-sidebar-button-menu");
       pfxMenu.addEventListener("popupshowing", () => {
         const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
-        const isCompactVertical = sidebarMain.hasAttribute("data-pfx-compact");
-        const isCompactHorizontal = document.documentElement.hasAttribute("data-pfx-compact-horizontal");
-        const isCompact = vertical ? isCompactVertical : isCompactHorizontal;
+        const isCompact = vertical ? compact.isCompactVertical() : compact.isCompactHorizontal();
         compactItem.setAttribute("label", isCompact ? "Disable Compact" : "Enable Compact");
         collapseItem.hidden = !vertical;
         if (vertical) {
@@ -943,19 +1021,14 @@
         const sidebarOpen = window.SidebarController?.isOpen ?? (!sidebarMain.hidden && sidebarMain.getBoundingClientRect().width > 0);
         sidebarItem.setAttribute("label", sidebarOpen ? "Disable Sidebar" : "Enable Sidebar");
         layoutItem.setAttribute("label", vertical ? "Horizontal Tabs" : "Vertical Tabs");
-        if (isCompactVertical) {
-          sidebarMain.setAttribute("pfx-has-hover", "true");
-          clearFlash();
-        }
-        if (isCompactHorizontal) {
-          navigatorToolbox.setAttribute("pfx-has-hover", "true");
-          clearFlashToolbox();
-        }
-        dbg("pfxMenu:popupshowing", { vertical, isCompactVertical, isCompactHorizontal, sidebarOpen });
+        if (compact.isCompactVertical())
+          compact.pinSidebar();
+        if (compact.isCompactHorizontal())
+          compact.pinToolbox();
       });
       pfxMenu.addEventListener("popuphidden", () => {
-        reconcileCompactState("pfxMenu:popuphidden");
-        reconcileCompactStateHorizontal("pfxMenu:popuphidden");
+        compact.reconcile("pfxMenu:popuphidden");
+        compact.reconcileHorizontal("pfxMenu:popuphidden");
       });
     }
     const identityBox = document.getElementById("identity-box");

@@ -34,7 +34,8 @@ src/
 │   ├── rows.ts           row creation/sync/visibility (factory: makeRows)
 │   └── layout.ts         panel positioning (factory: makeLayout)
 ├── drawer/      TypeScript source for chrome restructuring (palefox-drawer.uc.js)
-│   └── index.ts          @ts-nocheck'd legacy port — full TS port pending
+│   ├── index.ts          @ts-nocheck'd legacy orchestrator (layout, button/menu, banner)
+│   └── compact.ts        compact mode — fully typed factory: makeCompact()
 ├── hello/       Smoke-test script
 └── types/
     └── chrome.d.ts       ambient declarations for chrome globals + DOM augmentation
@@ -89,10 +90,12 @@ The infra is already there:
 
 - `createLogger("scope")` from `src/tabs/log.ts` — calls are no-ops when
   `pfx.debug` is false, and when on they write timestamped lines to
-  `<profile>/palefox-debug.log` AND console. Used across `src/tabs/*`.
-- `src/drawer/index.ts` has its own local `dbg()` writing to console only —
-  fine for now, but prefer routing drawer logs to the file too if you're
-  adding new ones.
+  `<profile>/palefox-debug.log` AND console. Used across `src/tabs/*` and
+  `src/drawer/compact.ts`. Wrap in a tiny `dbg(event, data)` helper if you
+  want a fixed payload (sidebar attribute state etc.) — see compact.ts.
+- `src/drawer/index.ts` is the remaining `@ts-nocheck`'d legacy block;
+  prefer adding new drawer code as typed factories under `src/drawer/*.ts`
+  rather than growing index.ts.
 - Profile path on this machine: `~/.mozilla/firefox/tom/`. Read
   `palefox-debug.log` from there directly with the Read tool. (Confirm via
   `~/.mozilla/firefox/profiles.ini` if you doubt the path.)
@@ -113,9 +116,15 @@ change — not a separate cleanup pass.
 
 ## Conventions
 
-### File structure (typed modules)
+### File structure
 
-For files over ~150 lines, use this layout:
+We have three kinds of TS module. Each has its own natural shape — don't
+force the wrong shape on the wrong kind of module.
+
+**1. Factory modules (the common case for >150-line files).** A module that
+exposes a curated API backed by private state. This is the shape for
+`drag.ts`, `rows.ts`, `layout.ts`, `menu.ts`, `events.ts`, `vim.ts`,
+`persist.ts`, `drawer/compact.ts`. **Required layout:**
 
 ```typescript
 // File-level header — what this module is, public exports, gotchas.
@@ -146,8 +155,28 @@ export function makeFoo(deps: FooDeps): FooAPI {
 }
 ```
 
-For tiny modules (`log.ts`, `types.ts`, `constants.ts`) — skip the section
-markers; the whole file IS the interface.
+The INTERFACE/IMPLEMENTATION split is *load-bearing* for factory modules —
+readers should be able to grok the surface area in 10 seconds without
+scrolling through 800 lines of internals.
+
+**2. Utility / pure-function modules** (`helpers.ts`). Every export IS the
+interface; there's no curated API to separate from internals. Skip the
+INTERFACE/IMPLEMENTATION markers. Use thematic subsections (e.g. helpers.ts
+has `// === SessionStore ===`, `// === Tab tree metadata ===`, `// === Row
+walks ===`) so readers can scan related exports together.
+
+**3. Orchestrator / entry-point modules** (`tabs/index.ts`,
+`drawer/index.ts`). Wires factories together and runs init. No INTERFACE
+markers — the file isn't consumed by other modules. The header comment
+should list **what stays here vs. what's been extracted** so future-you
+remembers which knobs live where.
+
+**4. Tiny modules** (`log.ts`, `types.ts`, `constants.ts`, `state.ts`).
+Under ~100 lines, no INTERFACE markers needed.
+
+If you grow a utility/orchestrator module to the point where it has clear
+private state + a public API to others, that's the signal to refactor it
+into a factory.
 
 ### State sharing — `src/tabs/state.ts`
 
@@ -257,8 +286,12 @@ rows = makeRows({ setupDrag: drag.setupDrag, … });
 - Adding a new `.uc.js`: add an entry to `build.config.ts`. The build will
   pick it up automatically.
 - Adding a new tab module: write it in `src/tabs/<name>.ts`, fully typed,
-  using the interface/implementation layout. Add factory deps if needed,
-  wire from `src/tabs/index.ts`'s init.
+  using the factory layout (INTERFACE / IMPLEMENTATION sections). Add
+  factory deps if needed, wire from `src/tabs/index.ts`'s init.
+- Adding a new drawer module: same shape, in `src/drawer/<name>.ts`. Wire
+  from `src/drawer/index.ts`. Don't grow `index.ts` itself with new
+  feature code — peel off into its own factory file. See `compact.ts` as
+  the reference example.
 - Adding new CSS: new `chrome/palefox-<name>.css` file, then add
   `@import url("palefox-<name>.css");` to `palefox.css`. Don't touch
   `userChrome.css`.
