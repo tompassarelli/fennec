@@ -1614,6 +1614,7 @@
   }
 
   // src/tabs/vim.ts
+  var log3 = createLogger("tabs/vim");
   function makeVim(deps) {
     const { rows, layout, scheduleSave, clearSelection, selectRange, sidebarMain } = deps;
     let chord = null;
@@ -2349,6 +2350,12 @@
           }
           refileSource = state.cursor;
           const srcLabel = dataOf(state.cursor)?.name || state.cursor._tab?.label || "tab";
+          log3("refile:start", {
+            srcLabel,
+            srcKind: refileSource._tab ? "tab" : refileSource._group ? "group" : "?",
+            srcLevel: levelOfRow(refileSource),
+            srcSubtreeSize: subtreeRows(refileSource).length
+          });
           modelineMsg(`Refile: "${srcLabel}" → search for target...`);
           setTimeout(() => startSearch(), 0);
           break;
@@ -2358,32 +2365,73 @@
       }
     }
     function executeRefile(target) {
-      if (!refileSource || !target || target === refileSource)
+      if (!refileSource) {
+        log3("refile:abort", { reason: "no-refileSource" });
         return;
+      }
+      if (!target) {
+        log3("refile:abort", { reason: "no-target" });
+        return;
+      }
+      if (target === refileSource) {
+        log3("refile:abort", { reason: "target-is-source" });
+        return;
+      }
       const srcRows = subtreeRows(refileSource);
-      if (srcRows.includes(target))
+      if (srcRows.includes(target)) {
+        log3("refile:abort", { reason: "target-in-source-subtree", srcRowsCount: srcRows.length });
+        modelineMsg("Can't refile under own subtree", 3000);
         return;
+      }
       const srcData = dataOf(refileSource);
       const tgtData = dataOf(target);
-      if (!srcData || !tgtData)
+      if (!srcData || !tgtData) {
+        log3("refile:abort", { reason: "no-data", hasSrcData: !!srcData, hasTgtData: !!tgtData });
         return;
+      }
+      const srcKind = refileSource._tab ? "tab" : "group";
+      const tgtKind = target._tab ? "tab" : "group";
+      const groupCountInSubtree = srcRows.filter((r) => r._group).length;
+      log3("refile:enter", {
+        srcLabel: srcData.name || refileSource._tab?.label,
+        tgtLabel: tgtData.name || target._tab?.label,
+        srcKind,
+        tgtKind,
+        srcLevel: levelOfRow(refileSource),
+        tgtLevel: levelOfRow(target),
+        srcSubtreeSize: srcRows.length,
+        groupCountInSubtree,
+        srcParentIdBefore: refileSource._tab ? treeData(refileSource._tab).parentId : null
+      });
       if (refileSource._tab && target._tab) {
+        const oldParentId = treeData(refileSource._tab).parentId;
         treeData(refileSource._tab).parentId = treeData(target._tab).id;
+        log3("refile:tab-to-tab", {
+          oldParentId,
+          newParentId: treeData(target._tab).id,
+          groupsAffected: groupCountInSubtree
+        });
       } else {
         const tgtLevel = levelOfRow(target);
         const srcLevel = levelOfRow(refileSource);
         const delta = tgtLevel + 1 - srcLevel;
+        log3("refile:level-delta", { srcLevel, tgtLevel, delta });
         for (const r of srcRows) {
           if (r._group)
             r._group.level = Math.max(0, (r._group.level || 0) + delta);
         }
       }
       const tgtSub = subtreeRows(target);
+      log3("refile:placing", { tgtSubtreeSize: tgtSub.length });
       tgtSub[tgtSub.length - 1].after(...srcRows);
       for (const r of srcRows)
         rows.syncAnyRow(r);
       rows.updateVisibility();
       scheduleSave();
+      log3("refile:done", {
+        srcLevelAfter: levelOfRow(refileSource),
+        groupLevelsAfter: srcRows.filter((r) => r._group).map((r) => r._group.level)
+      });
       const label = srcData.name || refileSource._tab?.label || "tab";
       const tgtLabel = tgtData.name || target._tab?.label || "tab";
       modelineMsg(`Refiled "${label}" → "${tgtLabel}"`);
@@ -2393,6 +2441,7 @@
     }
     function cancelRefile() {
       if (refileSource) {
+        log3("refile:cancel", {});
         refileSource = null;
         searchMatches = [];
         searchIdx = -1;

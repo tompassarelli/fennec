@@ -24,6 +24,7 @@ import {
   tabById,
   treeData,
 } from "./helpers.ts";
+import { createLogger } from "./log.ts";
 import { hzDisplay, rowOf, selection, state, treeOf } from "./state.ts";
 import type { Row, Tab } from "./types.ts";
 import type { LayoutAPI } from "./layout.ts";
@@ -32,6 +33,8 @@ import type { RowsAPI } from "./rows.ts";
 declare const document: Document;
 declare const gBrowser: any;
 declare const Services: any;
+
+const log = createLogger("tabs/vim");
 
 // =============================================================================
 // INTERFACE
@@ -818,6 +821,12 @@ export function makeVim(deps: VimDeps): VimAPI {
         }
         refileSource = state.cursor;
         const srcLabel = dataOf(state.cursor)?.name || state.cursor._tab?.label || "tab";
+        log("refile:start", {
+          srcLabel,
+          srcKind: refileSource._tab ? "tab" : refileSource._group ? "group" : "?",
+          srcLevel: levelOfRow(refileSource),
+          srcSubtreeSize: subtreeRows(refileSource).length,
+        });
         modelineMsg(`Refile: "${srcLabel}" → search for target...`);
         setTimeout(() => startSearch(), 0);
         break;
@@ -830,30 +839,79 @@ export function makeVim(deps: VimDeps): VimAPI {
   // ---------- Refile --------------------------------------------------------
 
   function executeRefile(target: Row): void {
-    if (!refileSource || !target || target === refileSource) return;
+    if (!refileSource) {
+      log("refile:abort", { reason: "no-refileSource" });
+      return;
+    }
+    if (!target) {
+      log("refile:abort", { reason: "no-target" });
+      return;
+    }
+    if (target === refileSource) {
+      log("refile:abort", { reason: "target-is-source" });
+      return;
+    }
     const srcRows = subtreeRows(refileSource);
-    if (srcRows.includes(target)) return;
+    if (srcRows.includes(target)) {
+      log("refile:abort", { reason: "target-in-source-subtree", srcRowsCount: srcRows.length });
+      modelineMsg("Can't refile under own subtree", 3000);
+      return;
+    }
     const srcData = dataOf(refileSource);
     const tgtData = dataOf(target);
-    if (!srcData || !tgtData) return;
+    if (!srcData || !tgtData) {
+      log("refile:abort", { reason: "no-data", hasSrcData: !!srcData, hasTgtData: !!tgtData });
+      return;
+    }
+
+    const srcKind = refileSource._tab ? "tab" : "group";
+    const tgtKind = target._tab ? "tab" : "group";
+    const groupCountInSubtree = srcRows.filter(r => r._group).length;
+    log("refile:enter", {
+      srcLabel: srcData.name || refileSource._tab?.label,
+      tgtLabel: tgtData.name || target._tab?.label,
+      srcKind, tgtKind,
+      srcLevel: levelOfRow(refileSource),
+      tgtLevel: levelOfRow(target),
+      srcSubtreeSize: srcRows.length,
+      groupCountInSubtree,
+      srcParentIdBefore: refileSource._tab ? treeData(refileSource._tab).parentId : null,
+    });
 
     if (refileSource._tab && target._tab) {
+      // Tab → Tab: update source's parentId. Descendants follow via parentId chain.
+      // BUG CANDIDATE: groups nested inside source's subtree have a STORED level
+      // that isn't derived from parentId. Their stored level was set relative to
+      // the OLD parent depth and doesn't get updated here.
+      const oldParentId = treeData(refileSource._tab).parentId;
       treeData(refileSource._tab).parentId = treeData(target._tab).id;
+      log("refile:tab-to-tab", {
+        oldParentId,
+        newParentId: treeData(target._tab).id,
+        groupsAffected: groupCountInSubtree,
+      });
     } else {
       const tgtLevel = levelOfRow(target);
       const srcLevel = levelOfRow(refileSource);
       const delta = (tgtLevel + 1) - srcLevel;
+      log("refile:level-delta", { srcLevel, tgtLevel, delta });
       for (const r of srcRows) {
         if (r._group) r._group.level = Math.max(0, (r._group.level || 0) + delta);
       }
     }
 
     const tgtSub = subtreeRows(target);
+    log("refile:placing", { tgtSubtreeSize: tgtSub.length });
     tgtSub[tgtSub.length - 1]!.after(...srcRows);
 
     for (const r of srcRows) rows.syncAnyRow(r);
     rows.updateVisibility();
     scheduleSave();
+
+    log("refile:done", {
+      srcLevelAfter: levelOfRow(refileSource),
+      groupLevelsAfter: srcRows.filter(r => r._group).map(r => r._group!.level),
+    });
 
     const label = srcData.name || (refileSource._tab?.label) || "tab";
     const tgtLabel = tgtData.name || (target._tab?.label) || "tab";
@@ -865,6 +923,7 @@ export function makeVim(deps: VimDeps): VimAPI {
 
   function cancelRefile(): void {
     if (refileSource) {
+      log("refile:cancel", {});
       refileSource = null;
       searchMatches = [];
       searchIdx = -1;
