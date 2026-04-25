@@ -458,17 +458,16 @@
     while (next && next !== state.spacer) {
       if (next._tab) {
         const lv = levelOf(next._tab);
-        if (lv < groupLevel)
+        if (lv <= groupLevel)
           break;
-        if (lv === groupLevel)
-          return treeData(next._tab).parentId;
+        return treeData(next._tab).parentId;
       }
       next = next.nextElementSibling;
     }
     let prev = group.previousElementSibling;
     while (prev) {
       if (prev._tab && levelOf(prev._tab) === groupLevel) {
-        return treeData(prev._tab).parentId;
+        return treeData(prev._tab).id;
       }
       prev = prev.previousElementSibling;
     }

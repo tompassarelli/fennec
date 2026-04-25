@@ -64,28 +64,40 @@ export type DragAPI = {
 // IMPLEMENTATION
 // =============================================================================
 
-/** Find the parentId for a tab being dropped onto a group. Groups can't be
- *  parents (they're labels, not tabs), so we mirror whatever a sibling tab
- *  at the same visual level as the group already uses for its parentId.
- *  Looks forward into the group's subtree first (the existing "tabs in this
- *  group"), then walks back outside the group. Falls back to null (root). */
+/** Find the parentId for a tab being dropped INTO a group (child / after).
+ *  Groups can't be parents (they're labels, not tabs), but the user expects
+ *  the dropped tab to appear visually nested inside the group's section —
+ *  which means level groupLevel + 1.
+ *
+ *  Two ways to derive that parentId:
+ *    1. Forward walk into the group's subtree — tabs there are already at
+ *       lv > groupLevel; their parentId is the level-groupLevel container
+ *       we want to inherit.
+ *    2. Back walk — find the closest preceding tab at exactly groupLevel.
+ *       That tab is the level-groupLevel container; its id is what we want
+ *       (source becomes its child at lv = groupLevel + 1).
+ *
+ *  Falls back to null if neither yields a result (group is detached at
+ *  level 0 with no preceding tab — treat source as root). */
 function findGroupContextParent(group: Row): number | null {
   const groupLevel = group._group?.level ?? 0;
-  // Forward: tabs visually inside the group at the group's level.
+
+  // Forward: any tab inside the group's visual subtree (lv > groupLevel).
   let next = group.nextElementSibling;
   while (next && next !== state.spacer) {
     if (next._tab) {
       const lv = levelOf(next._tab);
-      if (lv < groupLevel) break;
-      if (lv === groupLevel) return treeData(next._tab).parentId;
+      if (lv <= groupLevel) break; // exited the group's subtree
+      return treeData(next._tab).parentId; // its parent IS the container
     }
     next = next.nextElementSibling;
   }
-  // Backward: tabs above the group at the group's level.
+
+  // Backward: tab at exactly groupLevel — return its id (source is child).
   let prev = group.previousElementSibling;
   while (prev) {
     if (prev._tab && levelOf(prev._tab) === groupLevel) {
-      return treeData(prev._tab).parentId;
+      return treeData(prev._tab).id;
     }
     prev = prev.previousElementSibling;
   }

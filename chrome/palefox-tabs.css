@@ -44,10 +44,10 @@
   display: none !important;
 }
 #pfx-tab-panel[pfx-icons-only] .pfx-tab-row {
-  width: 32px;
-  height: 32px;
-  padding: 8px !important;
-  padding-inline-start: 8px !important;
+  width: 24px;
+  height: 24px;
+  padding: 4px !important;
+  padding-inline-start: 4px !important;
   justify-content: center;
   margin: 2px auto;
   min-height: unset;
@@ -97,10 +97,10 @@
 }
 
 #pfx-pinned-container .pfx-tab-row {
-  width: 32px;
-  height: 32px;
-  padding: 8px !important;
-  padding-inline-start: 8px !important;
+  width: 24px;
+  height: 24px;
+  padding: 4px !important;
+  padding-inline-start: 4px !important;
   justify-content: center;
   margin: 0;
   min-height: unset;
@@ -118,9 +118,9 @@
   justify-content: center;
 }
 #pfx-pinned-container[pfx-icons-only] .pfx-tab-row {
-  width: 32px;
-  height: 32px;
-  padding: 8px !important;
+  width: 24px;
+  height: 24px;
+  padding: 4px !important;
 }
 
 /* Symmetric drop zone in the tree panel — shown when dragging
