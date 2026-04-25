@@ -780,16 +780,20 @@ function init() {
     if (!sidebarMain.hasAttribute("data-pfx-compact")) return;
     if (sidebarMain.hasAttribute("pfx-has-hover")) return; // already shown
     if (_ignoreNextHover) return;
-    // Only trigger when cursor exited near the left edge (within the
-    // hover-strip width × ~3 to give a margin). Avoids false-positives
-    // from cursor exiting top / right / bottom.
+    // Only trigger when cursor exited near the edge the sidebar is anchored
+    // to (within the hover-strip width × ~3 for margin). Mirrors when
+    // sidebar.position_start flips from left → right.
     const triggerWidth = parseInt(
       getComputedStyle(document.documentElement)
         .getPropertyValue("--pfx-compact-trigger-width") || "8",
       10,
     );
-    if (e.clientX > triggerWidth * 3) return;
-    dbg("onDocMouseLeave:show", { clientX: e.clientX });
+    const onLeft = Services.prefs.getBoolPref("sidebar.position_start", true);
+    const nearEdge = onLeft
+      ? e.clientX <= triggerWidth * 3
+      : e.clientX >= window.innerWidth - triggerWidth * 3;
+    if (!nearEdge) return;
+    dbg("onDocMouseLeave:show", { clientX: e.clientX, onLeft });
     flashSidebar(OFFSCREEN_SHOW_DURATION);
   }
 

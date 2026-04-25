@@ -503,9 +503,11 @@
       if (_ignoreNextHover)
         return;
       const triggerWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--pfx-compact-trigger-width") || "8", 10);
-      if (e.clientX > triggerWidth * 3)
+      const onLeft = Services.prefs.getBoolPref("sidebar.position_start", true);
+      const nearEdge = onLeft ? e.clientX <= triggerWidth * 3 : e.clientX >= window.innerWidth - triggerWidth * 3;
+      if (!nearEdge)
         return;
-      dbg("onDocMouseLeave:show", { clientX: e.clientX });
+      dbg("onDocMouseLeave:show", { clientX: e.clientX, onLeft });
       flashSidebar(OFFSCREEN_SHOW_DURATION);
     }
     function compactDisable() {
