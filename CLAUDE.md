@@ -69,6 +69,48 @@ bun run typecheck   # tsc --noEmit (do this before committing big edits)
 Firefox to test. **Type errors do NOT fail the build** (`bun build` doesn't
 typecheck) — run `bun run typecheck` separately. Editor tsserver also runs.
 
+### Dev feedback loop
+
+Reloading Firefox is the user's expensive step, not yours. Don't make them
+copy-paste console output, hunt through devtools, or reload N times so you
+can guess. The loop is:
+
+1. **Bug report or feature request.**
+2. **Code solution.**
+3. **Wire up verbose, file-based logging** for every code path your change
+   touches — branches taken, values read, DOM/computed-style state. CSS-only
+   changes are not exempt: add JS that reads `getComputedStyle()` (or the
+   relevant DOM state) for the elements involved and logs that.
+4. User reloads and performs the action.
+5. User signals "tested" (pass / fail / "weird").
+6. If something's off, **you read the log yourself** and course-correct.
+
+The infra is already there:
+
+- `createLogger("scope")` from `src/tabs/log.ts` — calls are no-ops when
+  `pfx.debug` is false, and when on they write timestamped lines to
+  `<profile>/palefox-debug.log` AND console. Used across `src/tabs/*`.
+- `src/drawer/index.ts` has its own local `dbg()` writing to console only —
+  fine for now, but prefer routing drawer logs to the file too if you're
+  adding new ones.
+- Profile path on this machine: `~/.mozilla/firefox/tom/`. Read
+  `palefox-debug.log` from there directly with the Read tool. (Confirm via
+  `~/.mozilla/firefox/profiles.ini` if you doubt the path.)
+- `docs/chrome-reference/dump-chrome-dom.js` — paste into Browser Console
+  to dump the entire chrome DOM (with id/class/hidden/style/computed-style
+  hints) to `~/chrome-dom.txt`. Useful when you suspect stacking-context,
+  hidden-ancestor, or unknown-parent issues. You can read that file too.
+
+**When to ask the user to inspect anyway:** only if wiring the logging
+yourself is genuinely blocked — e.g., the element is in a shadow root you
+can't reach, or the bug only reproduces in a state you can't trigger from
+JS. Otherwise, write the logging.
+
+**Coverage expectation:** every load-bearing path or module should have
+`pfx.debug`-gated logging. Cheap when off, indispensable when on. If you
+touch a non-trivial function with no log calls, add a logger as part of the
+change — not a separate cleanup pass.
+
 ## Conventions
 
 ### File structure (typed modules)
