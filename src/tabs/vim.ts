@@ -1016,10 +1016,8 @@ export function makeVim(deps: VimDeps): VimAPI {
               modelineMsg(q ? `No sessions match "${q}"` : "No sessions yet", 3000);
               return;
             }
-            const summary = evs.slice(0, 5)
-              .map((e) => `${labelOf(e.tag) ?? "?"} (${(e.snapshot.nodes ?? []).filter((n) => n.type !== "group").length}t)`)
-              .join(" │ ");
-            modelineMsg(`Sessions: ${summary}${evs.length > 5 ? " …" : ""}`, 6000);
+            const summary = evs.slice(0, 5).map(summarizeEvent).join(" │ ");
+            modelineMsg(`Sessions: ${summary}${evs.length > 5 ? " …" : ""}`, 8000);
           } catch (e) {
             modelineMsg(`:sessions failed: ${(e as Error).message}`, 4000);
           }
@@ -1038,14 +1036,8 @@ export function makeVim(deps: VimDeps): VimAPI {
               modelineMsg(q ? `No events match "${q}"` : "No history yet", 3000);
               return;
             }
-            const summary = evs.slice(0, 5)
-              .map((e) => {
-                const t = labelOf(e.tag);
-                const when = new Date(e.timestamp).toLocaleTimeString();
-                return t ? `[${t}]` : when;
-              })
-              .join(" │ ");
-            modelineMsg(`History: ${summary}${evs.length > 5 ? " …" : ""}`, 6000);
+            const summary = evs.slice(0, 5).map(summarizeEvent).join(" │ ");
+            modelineMsg(`History: ${summary}${evs.length > 5 ? " …" : ""}`, 8000);
           } catch (e) {
             modelineMsg(`:history failed: ${(e as Error).message}`, 4000);
           }
@@ -1064,6 +1056,42 @@ export function makeVim(deps: VimDeps): VimAPI {
     if (!tag) return null;
     const i = tag.indexOf(":");
     return i >= 0 ? tag.slice(i + 1) : tag;
+  }
+
+  /** Compact one-event summary for modeline display. Format:
+   *    [tag-label-or-time]  Nt  hostname-or-name
+   *  Tagged:    "[checkpoint:research] 12t github.com"
+   *  Untagged:  "10:42 4t example.com"
+   *  Empty:     "10:42 0t" */
+  function summarizeEvent(e: import("./history.ts").HistoryEvent): string {
+    const t = labelOf(e.tag);
+    const head = t ? `[${t}]` : new Date(e.timestamp).toLocaleTimeString([], {
+      hour: "2-digit", minute: "2-digit",
+    });
+    const tabs = (e.snapshot.nodes ?? []).filter((n) => n.type !== "group");
+    const sample = pickSample(tabs);
+    return sample ? `${head} ${tabs.length}t ${sample}` : `${head} ${tabs.length}t`;
+  }
+
+  /** Pick a representative URL/name to differentiate similar events.
+   *  Prefer the most recent tab's user-given name if set; otherwise the
+   *  hostname of its URL; otherwise the first tab's hostname. Truncated. */
+  function pickSample(tabs: ReadonlyArray<import("./types.ts").SavedNode>): string {
+    const tail = tabs[tabs.length - 1];
+    const head = tabs[0];
+    const tryNode = (n: import("./types.ts").SavedNode | undefined): string => {
+      if (!n) return "";
+      if (n.name) return n.name;
+      const url = n.url || "";
+      try {
+        const host = new URL(url).hostname;
+        if (host) return host;
+      } catch {}
+      // about: URLs and others without a hostname — show a short suffix.
+      return url.slice(0, 24);
+    };
+    const out = tryNode(tail) || tryNode(head);
+    return out.length > 24 ? out.slice(0, 22) + "…" : out;
   }
 
   /** Restore a saved event into the live workspace as a subtree under a

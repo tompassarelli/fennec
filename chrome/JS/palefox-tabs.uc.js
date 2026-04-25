@@ -3008,8 +3008,8 @@
                 modelineMsg(q ? `No sessions match "${q}"` : "No sessions yet", 3000);
                 return;
               }
-              const summary = evs.slice(0, 5).map((e) => `${labelOf(e.tag) ?? "?"} (${(e.snapshot.nodes ?? []).filter((n) => n.type !== "group").length}t)`).join(" │ ");
-              modelineMsg(`Sessions: ${summary}${evs.length > 5 ? " …" : ""}`, 6000);
+              const summary = evs.slice(0, 5).map(summarizeEvent).join(" │ ");
+              modelineMsg(`Sessions: ${summary}${evs.length > 5 ? " …" : ""}`, 8000);
             } catch (e) {
               modelineMsg(`:sessions failed: ${e.message}`, 4000);
             }
@@ -3025,12 +3025,8 @@
                 modelineMsg(q ? `No events match "${q}"` : "No history yet", 3000);
                 return;
               }
-              const summary = evs.slice(0, 5).map((e) => {
-                const t = labelOf(e.tag);
-                const when = new Date(e.timestamp).toLocaleTimeString();
-                return t ? `[${t}]` : when;
-              }).join(" │ ");
-              modelineMsg(`History: ${summary}${evs.length > 5 ? " …" : ""}`, 6000);
+              const summary = evs.slice(0, 5).map(summarizeEvent).join(" │ ");
+              modelineMsg(`History: ${summary}${evs.length > 5 ? " …" : ""}`, 8000);
             } catch (e) {
               modelineMsg(`:history failed: ${e.message}`, 4000);
             }
@@ -3046,6 +3042,35 @@
         return null;
       const i = tag.indexOf(":");
       return i >= 0 ? tag.slice(i + 1) : tag;
+    }
+    function summarizeEvent(e) {
+      const t = labelOf(e.tag);
+      const head = t ? `[${t}]` : new Date(e.timestamp).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+      const tabs = (e.snapshot.nodes ?? []).filter((n) => n.type !== "group");
+      const sample = pickSample(tabs);
+      return sample ? `${head} ${tabs.length}t ${sample}` : `${head} ${tabs.length}t`;
+    }
+    function pickSample(tabs) {
+      const tail = tabs[tabs.length - 1];
+      const head = tabs[0];
+      const tryNode = (n) => {
+        if (!n)
+          return "";
+        if (n.name)
+          return n.name;
+        const url = n.url || "";
+        try {
+          const host = new URL(url).hostname;
+          if (host)
+            return host;
+        } catch {}
+        return url.slice(0, 24);
+      };
+      const out = tryNode(tail) || tryNode(head);
+      return out.length > 24 ? out.slice(0, 22) + "…" : out;
     }
     async function restoreEvent(event) {
       const env = event.snapshot;
