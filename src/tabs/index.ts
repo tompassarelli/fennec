@@ -8,6 +8,7 @@
 
 import { createLogger } from "./log.ts";
 import { INDENT, SAVE_FILE, CHORD_TIMEOUT, CLOSED_MEMORY, PIN_ATTR } from "./constants.ts";
+import type { Row, SavedNode, Tab, TreeData } from "./types.ts";
 import {
   state,
   treeOf, rowOf, hzDisplay, savedTabQueue, closedTabs,
@@ -37,7 +38,13 @@ const pfxLog = createLogger("tabs");
 
   // --- DOM references ---
 
-  const sidebarMain = document.getElementById("sidebar-main");
+  // Cast non-null; the early return below validates at runtime. Keeping the
+  // type as HTMLElement (instead of HTMLElement | null) means inner functions
+  // don't all need their own null checks across closure boundaries.
+  const sidebarMain = document.getElementById("sidebar-main") as HTMLElement;
+  // The build wraps this file in an IIFE, so this top-level `return` is
+  // actually inside the function. TS doesn't see the wrapper.
+  // @ts-expect-error TS1108 — intentional early-out from the IIFE.
   if (!sidebarMain) return;
 
   // (debug log moved to ./log.ts; pfxLog imported above)
@@ -49,8 +56,8 @@ const pfxLog = createLogger("tabs");
   let groupCounter = 0;
 
   // Vim mode
-  let chord = null;                 // pending chord key ("d", "g")
-  let chordTimer = 0;
+  let chord: string | null = null;  // pending chord key ("d", "g")
+  let chordTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let pendingCursorMove = false;    // move state.cursor to next new tab row
 
   // (selection and movingTabs imported from ./state.ts)
@@ -60,7 +67,7 @@ const pfxLog = createLogger("tabs");
   // (savedTabQueue imported from ./state.ts — ordered queue of saved-tab nodes
   // left over from last session's tree file. Session-restore tabs arriving later
   // via onTabOpen consume entries from this queue.)
-  let _lastLoadedNodes = [];   // snapshot of last load's tabNodes; consumed by onManualRestore
+  let _lastLoadedNodes: SavedNode[] = [];   // snapshot of last load's tabNodes; consumed by onManualRestore
   let _inSessionRestore = true;
 
   // Pin a tab's palefox id via SessionStore so it survives browser restart /
@@ -97,11 +104,8 @@ const pfxLog = createLogger("tabs");
   }
 
   function buildPanel() {
-    if (!state.panel) return;
-    while (state.panel.firstChild !== state.spacer) state.panel.firstChild.remove();
-    if (state.pinnedContainer) {
-      while (state.pinnedContainer.firstChild) state.pinnedContainer.firstChild.remove();
-    }
+    while (state.panel.firstChild !== state.spacer) state.panel.firstChild!.remove();
+    while (state.pinnedContainer.firstChild) state.pinnedContainer.firstChild.remove();
     for (const tab of gBrowser.tabs) {
       const row = Rows.createTabRow(tab);
       if (tab.pinned && state.pinnedContainer) {
@@ -222,15 +226,15 @@ const pfxLog = createLogger("tabs");
     const row = rowOf.get(tab);
 
     if (row) {
-      const td = dataOf(row);
+      const td = treeData(tab);
 
       // Snapshot identity + parent before we mutate the state.panel, so we can restore on reopen.
       rememberClosedTab(tab, td);
 
       // Reparent direct children to the closing tab's parent (promote one level).
       // Groups in our subtree keep their stored level decremented (transitional).
-      const closingId = td?.id;
-      const newParentId = td?.parentId ?? null;
+      const closingId = td.id;
+      const newParentId = td.parentId ?? null;
       const myLevel = levelOf(tab);
       let next = row.nextElementSibling;
       while (next && next !== state.spacer) {
@@ -245,7 +249,7 @@ const pfxLog = createLogger("tabs");
           const gLv = next._group.level || 0;
           if (gLv <= myLevel) break;
           next._group.level = Math.max(0, gLv - 1);
-          Rows.syncGroupRow(next);
+          Rows.syncGroupRow(next as Row);
         }
         next = next.nextElementSibling;
       }
@@ -359,9 +363,9 @@ const pfxLog = createLogger("tabs");
 
     const td = treeData(tab);
     td.id = entry.id;              // carry id forward so descendants can still find this tab
-    td.name = entry.name;
-    td.state = entry.state;
-    td.collapsed = entry.collapsed;
+    td.name = entry.name ?? null;
+    td.state = entry.state ?? null;
+    td.collapsed = entry.collapsed ?? false;
     pinTabId(tab, td.id);
 
     // Restore parentId directly. parentOfTab() will resolve it via tabById at
@@ -443,7 +447,7 @@ const pfxLog = createLogger("tabs");
     const myLevel = levelOf(tab);
 
     // Walk backwards for previous sibling.
-    let prevSiblingId = null;
+    let prevSiblingId: number | null = null;
     let r = row.previousElementSibling;
     while (r) {
       if (r._tab) {
@@ -456,7 +460,7 @@ const pfxLog = createLogger("tabs");
 
     // Walk forwards for descendants (anything below us with a higher level).
     // onTabClose promotes these one level up; we'll re-demote on restore.
-    const descendantIds = [];
+    const descendantIds: number[] = [];
     let n = row.nextElementSibling;
     while (n && n !== state.spacer) {
       if (n._tab) {
@@ -563,7 +567,7 @@ const pfxLog = createLogger("tabs");
   // --- Vim state.cursor ---
 
   // Track which tree is expanded in horizontal mode
-  let hzExpandedRoot = null;
+  let hzExpandedRoot: Row | null = null;
 
   function setCursor(row) {
     if (state.cursor) state.cursor.removeAttribute("pfx-cursor");
@@ -773,7 +777,7 @@ const pfxLog = createLogger("tabs");
     if (!nextRow || nextRow === state.spacer) return;
     if (levelOfRow(nextRow) !== myLevel) return;
 
-    subtreeRows(nextRow).at(-1).after(...rows);
+    subtreeRows(nextRow).at(-1)!.after(...rows);
     Rows.updateVisibility();
     scheduleSave();
   }
@@ -800,9 +804,11 @@ const pfxLog = createLogger("tabs");
   // Everything else (content, urlbar, chrome inputs) is untouched.
 
   let pendingCtrlW = false;
-  let pendingSpace = false;        // Space chord (SPC, w, h/l/w)
-  let modeline = null;
-  let modelineTimer = 0;
+  let pendingSpace: boolean | string = false;  // false | true | "w" — Space chord state
+  // Same trick as state.panel: declared non-null because every read happens
+  // after createModeline() has assigned a real element.
+  let modeline: HTMLElement = null as unknown as HTMLElement;
+  let modelineTimer: ReturnType<typeof setTimeout> | 0 = 0;
 
   function createModeline() {
     modeline = document.createXULElement("hbox");
@@ -1151,7 +1157,7 @@ const pfxLog = createLogger("tabs");
       // Move state.cursor off the selection first
       const last = rows[rows.length - 1];
       let next = last.nextElementSibling;
-      while (next && (next.hidden || next === state.spacer || rows.includes(next))) {
+      while (next && (next.hidden || next === state.spacer || rows.includes(next as Row))) {
         next = next.nextElementSibling;
       }
       if (next && next !== state.spacer) setCursor(next);
@@ -1180,7 +1186,7 @@ const pfxLog = createLogger("tabs");
         if (lv <= myLevel) break;
         if (next._group) {
           next._group.level = Math.max(0, (next._group.level || 0) - 1);
-          Rows.syncGroupRow(next);
+          Rows.syncGroupRow(next as Row);
         }
         next = next.nextElementSibling;
       }
@@ -1331,7 +1337,7 @@ const pfxLog = createLogger("tabs");
 
   // --- Refile ---
 
-  let refileSource = null;          // row being refiled (set by :refile)
+  let refileSource: Row | null = null;  // row being refiled (set by :refile)
 
   function executeRefile(target) {
     if (!refileSource || !target || target === refileSource) return;
@@ -1381,9 +1387,9 @@ const pfxLog = createLogger("tabs");
 
   // --- Search / filter (renders in modeline) ---
 
-  let searchInput = null;
+  let searchInput: HTMLInputElement | null = null;
   let searchActive = false;
-  let searchMatches = [];           // rows that matched last accepted search
+  let searchMatches: Row[] = [];    // rows that matched last accepted search
   let searchIdx = -1;               // current position in searchMatches
 
   function startSearch() {
@@ -1394,21 +1400,22 @@ const pfxLog = createLogger("tabs");
     for (const child of modeline.children) child.hidden = true;
     modeline.setAttribute("pfx-visible", "true");
 
-    searchInput = document.createElement("input");
-    searchInput.className = "pfx-search-input";
-    searchInput.placeholder = "";
-    modeline.appendChild(searchInput);
-    searchInput.focus();
+    const input = document.createElement("input");
+    searchInput = input;
+    input.className = "pfx-search-input";
+    input.placeholder = "";
+    modeline.appendChild(input);
+    input.focus();
 
     // Show "/" prefix
     const prefix = document.createXULElement("label");
     prefix.className = "pfx-search-prefix";
     prefix.setAttribute("value", "/");
-    modeline.insertBefore(prefix, searchInput);
+    modeline.insertBefore(prefix, input);
 
-    searchInput.addEventListener("input", () => applyFilter(searchInput.value));
+    input.addEventListener("input", () => applyFilter(input.value));
 
-    searchInput.addEventListener("keydown", (e) => {
+    input.addEventListener("keydown", (e) => {
       e.stopImmediatePropagation();
       e.stopPropagation();
       if (e.key === "Escape") {
@@ -1421,7 +1428,7 @@ const pfxLog = createLogger("tabs");
         if (panelActive) focusPanel();
         return;
       }
-      if (e.key === "Backspace" && !searchInput.value) {
+      if (e.key === "Backspace" && !input.value) {
         endSearch(false);
         focusPanel();
         return;
@@ -1490,7 +1497,7 @@ const pfxLog = createLogger("tabs");
     if (!q) { clearFilter(); return; }
 
     const rows = allRows();
-    const matched = new Set();
+    const matched = new Set<Row>();
 
     // Mark rows whose label OR url matches
     for (const row of rows) {
@@ -1510,7 +1517,7 @@ const pfxLog = createLogger("tabs");
       while (prev) {
         const plv = levelOfRow(prev);
         if (plv < lv) {
-          matched.add(prev);
+          matched.add(prev as Row);
           lv = plv;
         }
         if (plv === 0) break;
@@ -1553,9 +1560,9 @@ const pfxLog = createLogger("tabs");
       if (commit) {
         const v = input.value.trim();
         if (row._group) {
-          d.name = v || "New Group";
+          d!.name = v || "New Group";
         } else {
-          d.name = (v && v !== row._tab.label) ? v : null;
+          d!.name = (v && v !== row._tab!.label) ? v : null;
         }
         scheduleSave();
       }
@@ -1699,7 +1706,7 @@ const pfxLog = createLogger("tabs");
     }
   }
 
-  let loadedNodes = null;
+  let loadedNodes: readonly SavedNode[] | null = null;
 
   // Build the state.panel from gBrowser.tabs (canonical order). Interleave groups
   // at their saved afterTabId anchors. Unanchored groups go to the top.
@@ -1709,8 +1716,8 @@ const pfxLog = createLogger("tabs");
     const groupNodes = loadedNodes.filter(n => n.type === "group");
 
     // Bucket groups by their anchor tab id. `null` = "top of state.panel."
-    const leadingGroups = [];
-    const groupsAfter = new Map();
+    const leadingGroups: SavedNode[] = [];
+    const groupsAfter = new Map<number, SavedNode[]>();
     for (const g of groupNodes) {
       if (g.afterTabId == null) leadingGroups.push(g);
       else {
@@ -1720,18 +1727,16 @@ const pfxLog = createLogger("tabs");
       }
     }
 
-    const mkGroup = (g) => {
-      const row = Rows.createGroupRow(g.name, g.level || 0);
-      row._group.state = g.state || null;
-      row._group.collapsed = !!g.collapsed;
+    const mkGroup = (g: SavedNode): Row => {
+      const row = Rows.createGroupRow(g.name || "", g.level || 0);
+      row._group!.state = g.state || null;
+      row._group!.collapsed = !!g.collapsed;
       Rows.syncGroupRow(row);
       return row;
     };
 
-    while (state.panel.firstChild !== state.spacer) state.panel.firstChild.remove();
-    if (state.pinnedContainer) {
-      while (state.pinnedContainer.firstChild) state.pinnedContainer.firstChild.remove();
-    }
+    while (state.panel.firstChild !== state.spacer) state.panel.firstChild!.remove();
+    while (state.pinnedContainer.firstChild) state.pinnedContainer.firstChild.remove();
 
     for (const g of leadingGroups) state.panel.insertBefore(mkGroup(g), state.spacer);
 
@@ -1847,7 +1852,7 @@ const pfxLog = createLogger("tabs");
       );
       savedTabQueue.length = 0;
       _lastLoadedNodes.forEach((s, i) => {
-        if (aliveUrls.has(s.url)) return;
+        if (s.url && aliveUrls.has(s.url)) return;
         savedTabQueue.push({ ...s, _origIdx: i });
       });
       _inSessionRestore = true;

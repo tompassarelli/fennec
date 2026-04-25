@@ -1189,14 +1189,10 @@
     }
   }
   function buildPanel() {
-    if (!state.panel)
-      return;
     while (state.panel.firstChild !== state.spacer)
       state.panel.firstChild.remove();
-    if (state.pinnedContainer) {
-      while (state.pinnedContainer.firstChild)
-        state.pinnedContainer.firstChild.remove();
-    }
+    while (state.pinnedContainer.firstChild)
+      state.pinnedContainer.firstChild.remove();
     for (const tab of gBrowser.tabs) {
       const row = Rows.createTabRow(tab);
       if (tab.pinned && state.pinnedContainer) {
@@ -1291,10 +1287,10 @@
     const tab = e.target;
     const row = rowOf.get(tab);
     if (row) {
-      const td = dataOf(row);
+      const td = treeData(tab);
       rememberClosedTab(tab, td);
-      const closingId = td?.id;
-      const newParentId = td?.parentId ?? null;
+      const closingId = td.id;
+      const newParentId = td.parentId ?? null;
       const myLevel = levelOf(tab);
       let next = row.nextElementSibling;
       while (next && next !== state.spacer) {
@@ -1403,9 +1399,9 @@
     }
     const td = treeData(tab);
     td.id = entry.id;
-    td.name = entry.name;
-    td.state = entry.state;
-    td.collapsed = entry.collapsed;
+    td.name = entry.name ?? null;
+    td.state = entry.state ?? null;
+    td.collapsed = entry.collapsed ?? false;
     pinTabId(tab, td.id);
     td.parentId = entry.parentId ?? null;
     const parent = tabById(entry.parentId);
@@ -2363,17 +2359,18 @@
     for (const child of modeline.children)
       child.hidden = true;
     modeline.setAttribute("pfx-visible", "true");
-    searchInput = document.createElement("input");
-    searchInput.className = "pfx-search-input";
-    searchInput.placeholder = "";
-    modeline.appendChild(searchInput);
-    searchInput.focus();
+    const input = document.createElement("input");
+    searchInput = input;
+    input.className = "pfx-search-input";
+    input.placeholder = "";
+    modeline.appendChild(input);
+    input.focus();
     const prefix = document.createXULElement("label");
     prefix.className = "pfx-search-prefix";
     prefix.setAttribute("value", "/");
-    modeline.insertBefore(prefix, searchInput);
-    searchInput.addEventListener("input", () => applyFilter(searchInput.value));
-    searchInput.addEventListener("keydown", (e) => {
+    modeline.insertBefore(prefix, input);
+    input.addEventListener("input", () => applyFilter(input.value));
+    input.addEventListener("keydown", (e) => {
       e.stopImmediatePropagation();
       e.stopPropagation();
       if (e.key === "Escape") {
@@ -2387,7 +2384,7 @@
           focusPanel();
         return;
       }
-      if (e.key === "Backspace" && !searchInput.value) {
+      if (e.key === "Backspace" && !input.value) {
         endSearch(false);
         focusPanel();
         return;
@@ -2658,7 +2655,7 @@
       }
     }
     const mkGroup = (g) => {
-      const row = Rows.createGroupRow(g.name, g.level || 0);
+      const row = Rows.createGroupRow(g.name || "", g.level || 0);
       row._group.state = g.state || null;
       row._group.collapsed = !!g.collapsed;
       Rows.syncGroupRow(row);
@@ -2666,10 +2663,8 @@
     };
     while (state.panel.firstChild !== state.spacer)
       state.panel.firstChild.remove();
-    if (state.pinnedContainer) {
-      while (state.pinnedContainer.firstChild)
-        state.pinnedContainer.firstChild.remove();
-    }
+    while (state.pinnedContainer.firstChild)
+      state.pinnedContainer.firstChild.remove();
     for (const g of leadingGroups)
       state.panel.insertBefore(mkGroup(g), state.spacer);
     for (const tab of gBrowser.tabs) {
@@ -2758,7 +2753,7 @@
       const aliveUrls = new Set([...gBrowser.tabs].map((t) => tabUrl(t)).filter((u) => u && u !== "about:blank"));
       savedTabQueue.length = 0;
       _lastLoadedNodes.forEach((s, i) => {
-        if (aliveUrls.has(s.url))
+        if (s.url && aliveUrls.has(s.url))
           return;
         savedTabQueue.push({ ...s, _origIdx: i });
       });

@@ -21,8 +21,10 @@
     "noImplicitAny": false,
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
+    // noUncheckedIndexedAccess is intentionally off — pulls its weight in
+    // greenfield code but produces ~50 noise errors across the legacy file
+    // for arr[i] reads we know are bounded. Re-enable once legacy is tighter.
 
     // The chrome scripting environment exposes a lot of XUL/Mozilla globals.
     // Keep these off until we have ambient .d.ts coverage to match.

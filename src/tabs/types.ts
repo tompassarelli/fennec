@@ -24,6 +24,9 @@ export type TreeData = {
   state: string | null;
   /** Whether this tab's subtree is collapsed in the UI. */
   collapsed: boolean;
+  /** Set once a session-restore "apply" has stamped this tab. Prevents stale
+   *  queue entries from overwriting an already-corrected tab on later events. */
+  appliedSavedState?: boolean;
 };
 
 /** User-defined group header sitting between rows in the tree. */
@@ -48,7 +51,7 @@ export type SavedNode = {
   parentId: number | null;
   /** Present for group entries; absent for tabs. */
   type?: "group";
-  name?: string;
+  name?: string | null;
   state?: string | null;
   collapsed?: boolean;
   /** Present for tabs; URL at save time, used for re-pairing on session restore. */
@@ -59,4 +62,10 @@ export type SavedNode = {
   afterTabId?: number | null;
   /** Original index into the saved tab list — used for ordered restore. */
   _origIdx?: number;
+  /** Mid-session-closed entries: id of the previous sibling at close time,
+   *  used to re-position descendants on undoCloseTab. */
+  prevSiblingId?: number | null;
+  /** Mid-session-closed entries: ids of descendants captured at close time,
+   *  so the whole subtree comes back nested correctly. */
+  descendantIds?: number[];
 };

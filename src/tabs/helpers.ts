@@ -132,8 +132,9 @@ export function levelOf(tab: Tab): number {
   return lv;
 }
 
-/** Polymorphic level: computed for tab rows, stored for group rows. */
-export function levelOfRow(row: Row | null | undefined): number {
+/** Polymorphic level: computed for tab rows, stored for group rows. Accepts
+ *  Element so call sites that walk DOM siblings don't need to cast. */
+export function levelOfRow(row: Element | null | undefined): number {
   if (!row) return 0;
   if (row._group) return row._group.level || 0;
   if (row._tab) return levelOf(row._tab);
@@ -142,7 +143,7 @@ export function levelOfRow(row: Row | null | undefined): number {
 
 /** Polymorphic data access: returns TreeData for tab rows, Group for group
  *  rows, or null. Use levelOfRow(row) when you need polymorphic level. */
-export function dataOf(row: Row): TreeData | Group | null {
+export function dataOf(row: Element): TreeData | Group | null {
   if (row._group) return row._group;
   if (row._tab) return treeData(row._tab);
   return null;
@@ -170,23 +171,23 @@ export function allRows(): Row[] {
 }
 
 /** True iff `row` has any descendants in the panel. */
-export function hasChildren(row: Row): boolean {
-  const next = row.nextElementSibling as Row | null;
+export function hasChildren(row: Element): boolean {
+  const next = row.nextElementSibling;
   if (!next || next === state.spacer) return false;
   return levelOfRow(next) > levelOfRow(row);
 }
 
 /** Get `row` plus all deeper rows immediately following it (level-based walk).
  *  Works for mixed tab+group subtrees because levelOfRow is polymorphic. */
-export function subtreeRows(row: Row | null | undefined): Row[] {
+export function subtreeRows(row: Element | null | undefined): Row[] {
   if (!row) return [];
   const lv = levelOfRow(row);
-  const out: Row[] = [row];
-  let next = row.nextElementSibling as Row | null;
+  const out: Row[] = [row as Row];
+  let next = row.nextElementSibling;
   while (next && next !== state.spacer) {
     if (levelOfRow(next) <= lv) break;
-    out.push(next);
-    next = next.nextElementSibling as Row | null;
+    out.push(next as Row);
+    next = next.nextElementSibling;
   }
   return out;
 }

@@ -46,4 +46,19 @@ declare global {
   interface Document {
     createXULElement(tag: string): any;
   }
+
+  // Palefox decorates DOM elements (the rows it builds) with these private
+  // refs. Typing them as optional on every Element lets the legacy index.ts
+  // walk siblings/children without per-call casts. Real Row construction
+  // still goes through src/tabs/types.ts → Row.
+  interface Element {
+    _tab?: import("../tabs/types.ts").Tab;
+    _group?: import("../tabs/types.ts").Group;
+    /** All the XUL/HTML elements palefox touches are HTMLElement-shaped — they
+     *  have `hidden`, `style`, `isContentEditable`, etc. The DOM lib types
+     *  Element more strictly; this augmentation matches our runtime reality
+     *  and avoids casting at every sibling-walk site. */
+    hidden?: boolean;
+    isContentEditable?: boolean;
+  }
 }

@@ -16,19 +16,26 @@ import type { Row, SavedNode, Tab, TreeData } from "./types.ts";
  *  init() (DOM refs) or from event/menu handlers (cursor/contextTab/nextTabId).
  *  Readers see updates because object property reads aren't bindings.
  *
+ *  panel/spacer/pinnedContainer: typed as non-null. They start as `null` but
+ *  every code path that reads them runs AFTER init() has assigned. Casting
+ *  the initial null avoids "possibly null" noise at every read site.
+ *
+ *  cursor/contextTab: legitimately null when no row has focus / no menu is
+ *  open. Callers must null-check.
+ *
  *  Grow this object only when a typed module needs to share writes — single-
  *  module mutables stay local. */
 export const state: {
-  panel: HTMLElement | null;
-  spacer: HTMLElement | null;
-  pinnedContainer: HTMLElement | null;
+  panel: HTMLElement;
+  spacer: HTMLElement;
+  pinnedContainer: HTMLElement;
   contextTab: Tab | null;
   cursor: Row | null;
   nextTabId: number;
 } = {
-  panel: null,
-  spacer: null,
-  pinnedContainer: null,
+  panel: null as unknown as HTMLElement,
+  spacer: null as unknown as HTMLElement,
+  pinnedContainer: null as unknown as HTMLElement,
   contextTab: null,
   cursor: null,
   nextTabId: 1,
