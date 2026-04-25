@@ -417,14 +417,24 @@
     });
     const sidebarButton = document.getElementById("sidebar-button");
     if (sidebarButton) {
+      let updatePfxButtonTooltip2 = function() {
+        const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
+        pfxButton.setAttribute("tooltiptext", vertical ? "Toggle compact mode (right-click for more)" : "Toggle sidebar (right-click for more)");
+      };
+      var updatePfxButtonTooltip = updatePfxButtonTooltip2;
       const ogIcon = sidebarButton.querySelector(".toolbarbutton-icon");
       const ogIconStyle = ogIcon ? getComputedStyle(ogIcon).listStyleImage : null;
       sidebarButton.style.display = "none";
       const pfxButton = document.createXULElement("toolbarbutton");
       pfxButton.id = "pfx-sidebar-button";
       pfxButton.className = sidebarButton.className;
-      pfxButton.setAttribute("tooltiptext", "Toggle compact mode (right-click for more)");
       pfxButton.setAttribute("context", "toolbar-context-menu");
+      updatePfxButtonTooltip2();
+      const pfxButtonTooltipObserver = { observe: updatePfxButtonTooltip2 };
+      Services.prefs.addObserver("sidebar.verticalTabs", pfxButtonTooltipObserver);
+      window.addEventListener("unload", () => {
+        Services.prefs.removeObserver("sidebar.verticalTabs", pfxButtonTooltipObserver);
+      }, { once: true });
       for (const attr of [
         "cui-areatype",
         "widget-id",
@@ -441,8 +451,31 @@
       }
       sidebarButton.after(pfxButton);
       pfxButton.addEventListener("click", (e) => {
-        if (e.button === 0)
+        if (e.button !== 0)
+          return;
+        const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
+        if (vertical) {
           compactToggle();
+          return;
+        }
+        try {
+          const win = window;
+          if (win.SidebarController?.toggle) {
+            win.SidebarController.toggle();
+            return;
+          }
+          if (win.SidebarUI?.toggle) {
+            win.SidebarUI.toggle();
+            return;
+          }
+          const cmd = document.getElementById("cmd_toggleSidebar");
+          if (cmd?.doCommand) {
+            cmd.doCommand();
+            return;
+          }
+        } catch (err) {
+          console.error("palefox: pfx-button sidebar toggle failed", err);
+        }
       });
       const toolbarMenu = document.getElementById("toolbar-context-menu");
       if (toolbarMenu) {
@@ -455,11 +488,23 @@
         collapseItem.setAttribute("label", "Collapse Layout");
         collapseItem.hidden = true;
         collapseItem.addEventListener("command", () => {
-          const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
-          if (vertical) {
-            sidebarMain.toggleAttribute("sidebar-launcher-expanded");
-            return;
+          dbg("collapseItem:command");
+          const prevDisplay = sidebarButton.style.display;
+          sidebarButton.style.display = "";
+          try {
+            sidebarButton.click();
+          } catch (e) {
+            console.error("palefox: collapse layout failed", e);
+          } finally {
+            sidebarButton.style.display = prevDisplay;
           }
+        });
+        const sidebarItem = document.createXULElement("menuitem");
+        sidebarItem.id = "pfx-toggle-sidebar";
+        sidebarItem.setAttribute("label", "Enable Sidebar");
+        sidebarItem.hidden = true;
+        sidebarItem.addEventListener("command", () => {
+          dbg("sidebarItem:command");
           try {
             const win = window;
             if (win.SidebarController?.toggle) {
@@ -475,7 +520,7 @@
               cmd.doCommand();
               return;
             }
-            sidebarButton.click();
+            console.error("palefox: no sidebar-toggle API available");
           } catch (e) {
             console.error("palefox: sidebar toggle failed", e);
           }
@@ -489,9 +534,9 @@
         });
         const vertTabsItem = document.getElementById("toolbar-context-toggle-vertical-tabs");
         if (vertTabsItem) {
-          vertTabsItem.after(compactItem, collapseItem, layoutItem);
+          vertTabsItem.after(compactItem, collapseItem, sidebarItem, layoutItem);
         } else {
-          toolbarMenu.append(compactItem, collapseItem, layoutItem);
+          toolbarMenu.append(compactItem, collapseItem, sidebarItem, layoutItem);
         }
         const customizeSidebar = document.getElementById("toolbar-context-customize-sidebar");
         const toggleVertTabs = document.getElementById("toolbar-context-toggle-vertical-tabs");
@@ -501,9 +546,11 @@
         toolbarMenu.addEventListener("popupshown", () => {
           const isPfx = !!toolbarMenu.triggerNode?.closest("#sidebar-button, #pfx-sidebar-button");
           compactItem.hidden = !isPfx;
-          collapseItem.hidden = !isPfx;
           layoutItem.hidden = !isPfx;
           if (isPfx) {
+            const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
+            collapseItem.hidden = !vertical;
+            sidebarItem.hidden = false;
             const isCompact = sidebarMain.hasAttribute("data-pfx-compact");
             compactItem.setAttribute("label", isCompact ? "Disable Compact" : "Enable Compact");
             if (customizeSidebar)
@@ -516,11 +563,16 @@
               pinToOverflow.hidden = true;
             if (removeFromToolbar)
               removeFromToolbar.hidden = true;
-            const vertical = Services.prefs.getBoolPref("sidebar.verticalTabs", true);
             layoutItem.setAttribute("label", vertical ? "Horizontal Tabs" : "Vertical Tabs");
-            const sidebarActive = vertical ? sidebarMain.hasAttribute("sidebar-launcher-expanded") : window.SidebarController?.isOpen ?? (!sidebarMain.hidden && sidebarMain.getBoundingClientRect().width > 0);
-            const labels = vertical ? { on: "Collapse Layout", off: "Expand Layout" } : { on: "Disable Sidebar", off: "Enable Sidebar" };
-            collapseItem.setAttribute("label", sidebarActive ? labels.on : labels.off);
+            if (vertical) {
+              const expanded = sidebarMain.hasAttribute("sidebar-launcher-expanded");
+              collapseItem.setAttribute("label", expanded ? "Collapse Layout" : "Expand Layout");
+            }
+            const sidebarOpen = window.SidebarController?.isOpen ?? (!sidebarMain.hidden && sidebarMain.getBoundingClientRect().width > 0);
+            sidebarItem.setAttribute("label", sidebarOpen ? "Disable Sidebar" : "Enable Sidebar");
+          } else {
+            collapseItem.hidden = true;
+            sidebarItem.hidden = true;
           }
         });
       }

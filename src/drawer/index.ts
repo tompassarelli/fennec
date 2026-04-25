@@ -617,8 +617,29 @@ function init() {
     const pfxButton = document.createXULElement("toolbarbutton");
     pfxButton.id = "pfx-sidebar-button";
     pfxButton.className = sidebarButton.className;
-    pfxButton.setAttribute("tooltiptext", "Toggle compact mode (right-click for more)");
     pfxButton.setAttribute("context", "toolbar-context-menu");
+
+    // Tooltip reflects the left-click action — which depends on layout mode.
+    // Vertical: toggle compact. Horizontal: toggle bookmarks sidebar.
+    function updatePfxButtonTooltip() {
+      const vertical = Services.prefs.getBoolPref(
+        "sidebar.verticalTabs", true
+      );
+      pfxButton.setAttribute(
+        "tooltiptext",
+        vertical
+          ? "Toggle compact mode (right-click for more)"
+          : "Toggle sidebar (right-click for more)"
+      );
+    }
+    updatePfxButtonTooltip();
+    const pfxButtonTooltipObserver = { observe: updatePfxButtonTooltip };
+    Services.prefs.addObserver("sidebar.verticalTabs", pfxButtonTooltipObserver);
+    window.addEventListener("unload", () => {
+      Services.prefs.removeObserver(
+        "sidebar.verticalTabs", pfxButtonTooltipObserver
+      );
+    }, { once: true });
     // Copy CUI attributes so Firefox's popupshowing logic recognizes
     // our button as a real toolbar widget
     for (const attr of [
@@ -637,9 +658,29 @@ function init() {
     }
     sidebarButton.after(pfxButton);
 
-    // Left-click: toggle compact mode
+    // Left-click action depends on layout mode:
+    //   Vertical:   toggle compact mode (autohide ↔ visible).
+    //   Horizontal: toggle the bookmarks/history sidebar widget. There's
+    //               no compact concept in horizontal mode (no sidebar to
+    //               autohide), so the button gets the more useful action.
     pfxButton.addEventListener("click", (e) => {
-      if (e.button === 0) compactToggle();
+      if (e.button !== 0) return;
+      const vertical = Services.prefs.getBoolPref(
+        "sidebar.verticalTabs", true
+      );
+      if (vertical) {
+        compactToggle();
+        return;
+      }
+      try {
+        const win = window;
+        if (win.SidebarController?.toggle) { win.SidebarController.toggle(); return; }
+        if (win.SidebarUI?.toggle) { win.SidebarUI.toggle(); return; }
+        const cmd = document.getElementById("cmd_toggleSidebar");
+        if (cmd?.doCommand) { cmd.doCommand(); return; }
+      } catch (err) {
+        console.error("palefox: pfx-button sidebar toggle failed", err);
+      }
     });
 
     // Overload #toolbar-context-menu with our items
@@ -650,28 +691,36 @@ function init() {
       compactItem.hidden = true;
       compactItem.addEventListener("command", () => compactToggle());
 
+      // "Collapse / Expand Layout" — vertical mode only. Toggles the
+      // sidebar-launcher-expanded attribute (icons-only ↔ full layout).
+      // The native sidebar-button is display:none, which suppresses its
+      // command on programmatic .click(); briefly un-hide, click, restore.
       const collapseItem = document.createXULElement("menuitem");
       collapseItem.id = "pfx-collapse-layout";
       collapseItem.setAttribute("label", "Collapse Layout");
       collapseItem.hidden = true;
       collapseItem.addEventListener("command", () => {
-        // The action depends on layout mode:
-        //   Vertical:   "Collapse Layout" toggles the icons-only strip via
-        //               the sidebar-launcher-expanded attribute. The
-        //               attribute observer in palefox-tabs catches this and
-        //               re-runs positionPanel. Calling SidebarController
-        //               here would instead show/hide the bookmarks
-        //               sidebar — wrong action for vertical mode.
-        //   Horizontal: "Enable/Disable Sidebar" shows/hides the
-        //               bookmarks/history sidebar widget.
-        const vertical = Services.prefs.getBoolPref(
-          "sidebar.verticalTabs",
-          true
-        );
-        if (vertical) {
-          sidebarMain.toggleAttribute("sidebar-launcher-expanded");
-          return;
+        dbg("collapseItem:command");
+        const prevDisplay = sidebarButton.style.display;
+        sidebarButton.style.display = "";
+        try {
+          sidebarButton.click();
+        } catch (e) {
+          console.error("palefox: collapse layout failed", e);
+        } finally {
+          sidebarButton.style.display = prevDisplay;
         }
+      });
+
+      // "Enable / Disable Sidebar" — show/hide the bookmarks/history
+      // sidebar widget. Available in both modes; uses Firefox's
+      // SidebarController API directly.
+      const sidebarItem = document.createXULElement("menuitem");
+      sidebarItem.id = "pfx-toggle-sidebar";
+      sidebarItem.setAttribute("label", "Enable Sidebar");
+      sidebarItem.hidden = true;
+      sidebarItem.addEventListener("command", () => {
+        dbg("sidebarItem:command");
         try {
           const win = window;
           if (win.SidebarController?.toggle) {
@@ -682,13 +731,12 @@ function init() {
             win.SidebarUI.toggle();
             return;
           }
-          // Fall back to the global command.
           const cmd = document.getElementById("cmd_toggleSidebar");
           if (cmd?.doCommand) {
             cmd.doCommand();
             return;
           }
-          sidebarButton.click();
+          console.error("palefox: no sidebar-toggle API available");
         } catch (e) {
           console.error("palefox: sidebar toggle failed", e);
         }
@@ -709,9 +757,9 @@ function init() {
         "toolbar-context-toggle-vertical-tabs"
       );
       if (vertTabsItem) {
-        vertTabsItem.after(compactItem, collapseItem, layoutItem);
+        vertTabsItem.after(compactItem, collapseItem, sidebarItem, layoutItem);
       } else {
-        toolbarMenu.append(compactItem, collapseItem, layoutItem);
+        toolbarMenu.append(compactItem, collapseItem, sidebarItem, layoutItem);
       }
 
       // Native menu items to show/hide for our custom button
@@ -735,9 +783,16 @@ function init() {
           "#sidebar-button, #pfx-sidebar-button"
         );
         compactItem.hidden = !isPfx;
-        collapseItem.hidden = !isPfx;
         layoutItem.hidden = !isPfx;
+        // collapseItem is vertical-only; sidebarItem is always available.
         if (isPfx) {
+          const vertical = Services.prefs.getBoolPref(
+            "sidebar.verticalTabs",
+            true
+          );
+          collapseItem.hidden = !vertical;
+          sidebarItem.hidden = false;
+
           const isCompact = sidebarMain.hasAttribute("data-pfx-compact");
           compactItem.setAttribute(
             "label",
@@ -750,32 +805,34 @@ function init() {
           if (pinToOverflow) pinToOverflow.hidden = true;
           if (removeFromToolbar) removeFromToolbar.hidden = true;
 
-          const vertical = Services.prefs.getBoolPref(
-            "sidebar.verticalTabs",
-            true
-          );
           layoutItem.setAttribute(
             "label",
             vertical ? "Horizontal Tabs" : "Vertical Tabs"
           );
 
-          // Ground-truth check: is the sidebar actually rendered? The
-          // sidebar-launcher-expanded attribute tracks the vertical-tabs
-          // drawer state. In horizontal mode the bookmarks/history sidebar
-          // lives outside #sidebar-main, so use SidebarController.isOpen
-          // (the modern revamp API) when it's available.
-          const sidebarActive = vertical
-            ? sidebarMain.hasAttribute("sidebar-launcher-expanded")
-            : (window.SidebarController?.isOpen
-               ?? (!sidebarMain.hidden
-                   && sidebarMain.getBoundingClientRect().width > 0));
-          const labels = vertical
-            ? { on: "Collapse Layout", off: "Expand Layout" }
-            : { on: "Disable Sidebar", off: "Enable Sidebar" };
-          collapseItem.setAttribute(
+          // Vertical-only: collapseItem label flips with launcher state.
+          if (vertical) {
+            const expanded = sidebarMain.hasAttribute(
+              "sidebar-launcher-expanded"
+            );
+            collapseItem.setAttribute(
+              "label",
+              expanded ? "Collapse Layout" : "Expand Layout"
+            );
+          }
+
+          // sidebarItem label flips with bookmarks-sidebar visibility.
+          // SidebarController.isOpen is the modern revamp signal.
+          const sidebarOpen = window.SidebarController?.isOpen
+            ?? (!sidebarMain.hidden
+                && sidebarMain.getBoundingClientRect().width > 0);
+          sidebarItem.setAttribute(
             "label",
-            sidebarActive ? labels.on : labels.off
+            sidebarOpen ? "Disable Sidebar" : "Enable Sidebar"
           );
+        } else {
+          collapseItem.hidden = true;
+          sidebarItem.hidden = true;
         }
       });
     }
