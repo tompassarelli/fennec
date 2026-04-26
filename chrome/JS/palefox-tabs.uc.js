@@ -3068,8 +3068,37 @@
                 gBrowser.selectedBrowser.goForward();
               } catch {}
               return;
+            case "j":
+              if (!keyEnabled("j"))
+                break;
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              if (e.repeat)
+                return;
+              try {
+                gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStart", { dy: 1 });
+              } catch {}
+              return;
+            case "k":
+              if (!keyEnabled("k"))
+                break;
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              if (e.repeat)
+                return;
+              try {
+                gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStart", { dy: -1 });
+              } catch {}
+              return;
           }
         }
+      }, true);
+      document.addEventListener("keyup", (e) => {
+        if (e.key !== "j" && e.key !== "k")
+          return;
+        try {
+          gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStop");
+        } catch {}
       }, true);
     }
     function setupVimKeys() {
@@ -4483,6 +4512,44 @@
   addMessageListener("Palefox:FocusProbe", function () {
     lastReported = null;
     report();
+  });
+
+  // Cross-process smooth scroll. Chrome can't reach content.scrollBy
+  // directly across e10s (and goDoCommand("cmd_scrollLineDown") doesn't
+  // route to content scroll either). The frame script lives in content
+  // scope, so it can call content.scrollBy + content.requestAnimationFrame.
+  //
+  // The j/k handlers in src/tabs/vim.ts send Palefox:ScrollStart on the
+  // initial keydown and Palefox:ScrollStop on keyup. We drive the scroll
+  // locally with a content-scope rAF loop so it's linear from the very
+  // first frame — unlike OS key auto-repeat, which has a ~500ms delay
+  // before the first repeat fires.
+  //
+  // Pattern lifted from Vimium's content_scripts/scroller.js CoreScroller.
+  let scrollDir = 0;
+  const SCROLL_PX_PER_FRAME = 12; // ~720px/sec at 60fps
+  function scrollFrame() {
+    if (scrollDir === 0) return; // loop self-terminates
+    try {
+      if (content) content.scrollBy(0, scrollDir * SCROLL_PX_PER_FRAME);
+    } catch (_) {}
+    if (content && content.requestAnimationFrame) {
+      content.requestAnimationFrame(scrollFrame);
+    }
+  }
+  addMessageListener("Palefox:ScrollStart", function (msg) {
+    const data = (msg && msg.data) || {};
+    const dy = typeof data.dy === "number" ? data.dy : 0;
+    const dir = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+    if (dir === 0) return;
+    const wasIdle = scrollDir === 0;
+    scrollDir = dir;
+    if (wasIdle && content && content.requestAnimationFrame) {
+      content.requestAnimationFrame(scrollFrame);
+    }
+  });
+  addMessageListener("Palefox:ScrollStop", function () {
+    scrollDir = 0;
   });
 
   report();

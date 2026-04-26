@@ -531,8 +531,10 @@ export function makeVim(deps: VimDeps): VimAPI {
   //   t           open tabs picker for THIS chrome window
   //   T           open tabs picker for ALL chrome windows (shift = broader scope —
   //               same convention as vim's b/B, Doom's SPC b b / SPC b B)
-  //   h           history back (vim left)
-  //   l           history forward (vim right)
+  //   h / l       history back / forward (vim left / right)
+  //   j / k       scroll page down / up (vim down / up). When the vim
+  //               panel is active, j/k navigate the cursor instead —
+  //               setupVimKeys intercepts first.
   //   :           discoverable ex-command picker — shows all commands,
   //               filters as you type, Enter selects + opens modeline pre-filled
   //   :           open spotlight ex-input
@@ -884,9 +886,53 @@ export function makeVim(deps: VimDeps): VimAPI {
             e.stopImmediatePropagation();
             try { gBrowser.selectedBrowser.goForward(); } catch {}
             return;
+          case "j":
+            // Vim convention: j is down → scroll page down. Note this case
+            // is unreachable when the vim panel is active (setupVimKeys
+            // intercepts first and routes j to cursor-down). Fires only on
+            // content-body focus where the user expects page scroll.
+            //
+            // Implementation: chrome can't call content.scrollBy directly
+            // across e10s, and goDoCommand("cmd_scrollLineDown") doesn't
+            // route to content scroll. We send Palefox:ScrollStart to the
+            // frame script in content-focus.ts which drives a content-scope
+            // requestAnimationFrame loop. Skip on e.repeat — OS auto-repeat
+            // would re-trigger and double-start; the rAF loop is already
+            // running. ScrollStop fires from the document-level keyup
+            // listener below.
+            if (!keyEnabled("j")) break;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (e.repeat) return;
+            try {
+              gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStart", { dy: 1 });
+            } catch {}
+            return;
+          case "k":
+            // Vim convention: k is up → scroll page up.
+            if (!keyEnabled("k")) break;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (e.repeat) return;
+            try {
+              gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStart", { dy: -1 });
+            } catch {}
+            return;
           // / intentionally NOT bound — Firefox's find-as-you-type owns it.
         }
       }
+    }, true);
+
+    // Pair to the j/k ScrollStart dispatch above. Sending ScrollStop on
+    // every j/k keyup is harmless when no scroll is running (the frame
+    // script just zeroes scrollDir, which is already 0). We deliberately
+    // don't gate on the same bail conditions as keydown — if the keydown
+    // was bailed, no Start was sent, so the Stop is a no-op anyway.
+    document.addEventListener("keyup", (e) => {
+      if (e.key !== "j" && e.key !== "k") return;
+      try {
+        gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStop");
+      } catch {}
     }, true);
   }
 
