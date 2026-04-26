@@ -222,7 +222,14 @@ const tests: IntegrationTest[] = [
       `);
       const tabsBefore = await mn.executeScript<number>(`return gBrowser.tabs.length;`);
 
+      // Deactivate the vim panel first — setupVimKeys' SPC-chord prefix
+      // consumes Space when the panel is active, so leader can't arm.
+      await mn.executeScript(`window.pfxTest.vim.blurPanel(); return true;`);
+      // Leader-mode default — arm with Space, then press `x`.
       await mn.executeScript(`
+        document.dispatchEvent(new KeyboardEvent("keydown", {
+          key: " ", bubbles: true, cancelable: true, view: window,
+        }));
         document.dispatchEvent(new KeyboardEvent("keydown", {
           key: "x", bubbles: true, cancelable: true, view: window,
         }));

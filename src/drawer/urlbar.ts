@@ -174,9 +174,23 @@ export function makeUrlbar(deps: UrlbarDeps): UrlbarAPI {
 
     if (!activated) return;
     if (e.key === "Escape") {
-      // Let the urlbar's own Esc handler close the dropdown first; then we
-      // strip our decoration on the next tick.
-      setTimeout(deactivateFloating, 0);
+      // Let Firefox's own Esc handler close the dropdown / revert input
+      // first; on the next tick strip our decoration AND move focus back
+      // to content so a second Esc doesn't ping-pong against a still-
+      // focused urlbar. The previous implementation deferred only
+      // deactivateFloating, which left the urlbar focused with text
+      // selected — Esc didn't feel like Esc.
+      setTimeout(() => {
+        deactivateFloating();
+        try {
+          const a = document.activeElement;
+          if (a === urlbar || (a && urlbar.contains(a))) {
+            window.gBrowser?.selectedBrowser?.focus?.();
+          }
+        } catch (err) {
+          log("escape:focus-content-error", { msg: String(err) });
+        }
+      }, 0);
       return;
     }
     if (e.key === "Enter") {

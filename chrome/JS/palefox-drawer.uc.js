@@ -1253,7 +1253,17 @@
       if (!activated)
         return;
       if (e.key === "Escape") {
-        setTimeout(deactivateFloating, 0);
+        setTimeout(() => {
+          deactivateFloating();
+          try {
+            const a = document.activeElement;
+            if (a === urlbar || a && urlbar.contains(a)) {
+              window.gBrowser?.selectedBrowser?.focus?.();
+            }
+          } catch (err) {
+            log("escape:focus-content-error", { msg: String(err) });
+          }
+        }, 0);
         return;
       }
       if (e.key === "Enter") {

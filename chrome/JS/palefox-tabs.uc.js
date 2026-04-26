@@ -2427,7 +2427,6 @@
     let chord = null;
     let chordTimer = 0;
     let pendingCtrlW = false;
-    let pendingSpace = false;
     let pendingCursorMove = false;
     let hzExpandedRoot = null;
     let modeline = null;
@@ -2725,11 +2724,7 @@
       const chordLabel = document.getElementById("pfx-modeline-chord");
       const msgLabel = document.getElementById("pfx-modeline-msg");
       let pending = "";
-      if (pendingSpace === true)
-        pending = "SPC-";
-      else if (pendingSpace === "w")
-        pending = "SPC w-";
-      else if (pendingCtrlW)
+      if (pendingCtrlW)
         pending = "C-w-";
       else if (chord === "g")
         pending = "g-";
@@ -2768,7 +2763,6 @@
       panelActive = false;
       chord = null;
       pendingCtrlW = false;
-      pendingSpace = false;
       clearTimeout(chordTimer);
       if (isHorizontal() && hzExpandedRoot) {
         collapseHzTree(hzExpandedRoot);
@@ -2779,6 +2773,11 @@
     }
     let lastTab = null;
     let currentSelectedTab = null;
+    let leaderArmed = false;
+    let leaderTimer = null;
+    let whichKeyEl = null;
+    let leaderPrevFocus = null;
+    let leaderFocusStash = null;
     function openTabsPicker(scope = "current") {
       const Palefox = window.Palefox;
       if (scope === "all" && Palefox) {
@@ -2891,6 +2890,14 @@
       });
     }
     function activateUrlbar(intent) {
+      try {
+        const u = window.gURLBar;
+        if (u) {
+          u.focus?.();
+          u.select?.();
+          u.view?.autoOpen?.({ event: new Event("command") });
+        }
+      } catch {}
       document.dispatchEvent(new CustomEvent("pfx-urlbar-activate", {
         detail: { intent }
       }));
@@ -2974,6 +2981,234 @@
       Services.prefs.setStringPref("pfx.keys.blacklist", next.join(","));
       return true;
     }
+    function leaderKey() {
+      if (!Services.prefs.getBoolPref("pfx.keys.useLeader", false))
+        return null;
+      const v = Services.prefs.getStringPref("pfx.keys.leader", " ");
+      return v.length === 0 ? null : v;
+    }
+    function leaderTimeoutMs() {
+      return Services.prefs.getIntPref("pfx.keys.leader_timeout", 1500);
+    }
+    const LEADER_BINDINGS = [
+      { key: "t", desc: "tabs (this window)" },
+      { key: "T", desc: "tabs (all windows)" },
+      { key: "o", desc: "urlbar" },
+      { key: "O", desc: "urlbar (new tab)" },
+      { key: "x", desc: "close tab" },
+      { key: "`", desc: "last tab" },
+      { key: "h", desc: "history back" },
+      { key: "l", desc: "history forward" },
+      { key: "j", desc: "scroll down" },
+      { key: "k", desc: "scroll up" },
+      { key: "e", desc: "toggle compact mode" },
+      { key: "?", desc: "show this help" }
+    ];
+    function whichKeyEnsure() {
+      if (whichKeyEl && whichKeyEl.isConnected)
+        return whichKeyEl;
+      const el = document.createElement("div");
+      el.id = "pfx-which-key";
+      el.hidden = true;
+      const header = document.createElement("div");
+      header.className = "pfx-wk-header";
+      header.textContent = "leader";
+      el.appendChild(header);
+      for (const b of LEADER_BINDINGS) {
+        if (!keyEnabled(bindingPrefName(b.key)))
+          continue;
+        const row = document.createElement("div");
+        row.className = "pfx-wk-row";
+        const k = document.createElement("span");
+        k.className = "pfx-wk-key";
+        k.textContent = b.key === " " ? "Space" : b.key;
+        const d = document.createElement("span");
+        d.className = "pfx-wk-desc";
+        d.textContent = b.desc;
+        row.appendChild(k);
+        row.appendChild(d);
+        el.appendChild(row);
+      }
+      document.documentElement.appendChild(el);
+      whichKeyEl = el;
+      return el;
+    }
+    function bindingPrefName(key) {
+      switch (key) {
+        case ":":
+          return "colon";
+        case "`":
+          return "backtick";
+        default:
+          return key;
+      }
+    }
+    function ensureLeaderFocusStash() {
+      if (leaderFocusStash && leaderFocusStash.isConnected)
+        return leaderFocusStash;
+      const el = document.createElement("div");
+      el.id = "pfx-leader-focus-stash";
+      el.setAttribute("aria-hidden", "true");
+      el.setAttribute("tabindex", "-1");
+      el.style.position = "fixed";
+      el.style.top = "-9999px";
+      el.style.left = "-9999px";
+      el.style.width = "1px";
+      el.style.height = "1px";
+      el.style.opacity = "0";
+      el.style.pointerEvents = "none";
+      document.documentElement.appendChild(el);
+      leaderFocusStash = el;
+      return el;
+    }
+    function armLeader() {
+      leaderArmed = true;
+      if (leaderTimer !== null)
+        clearTimeout(leaderTimer);
+      leaderTimer = setTimeout(() => disarmLeader(), leaderTimeoutMs());
+      const a = document.activeElement;
+      if (a && a !== leaderFocusStash)
+        leaderPrevFocus = a;
+      try {
+        ensureLeaderFocusStash().focus();
+      } catch {}
+    }
+    function disarmLeader() {
+      leaderArmed = false;
+      if (leaderTimer !== null) {
+        clearTimeout(leaderTimer);
+        leaderTimer = null;
+      }
+      try {
+        if (leaderPrevFocus && document.activeElement === leaderFocusStash) {
+          leaderPrevFocus.focus?.();
+        }
+      } catch {}
+      leaderPrevFocus = null;
+    }
+    function toggleWhichKey() {
+      const el = whichKeyEnsure();
+      el.hidden = !el.hidden;
+    }
+    function hideWhichKey() {
+      if (whichKeyEl)
+        whichKeyEl.hidden = true;
+    }
+    function tryDispatchBinding(e) {
+      if (e.ctrlKey || e.altKey || e.metaKey)
+        return false;
+      switch (e.key) {
+        case "t":
+          if (!keyEnabled("t"))
+            return false;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          openTabsPicker("current");
+          return true;
+        case "T":
+          if (!keyEnabled("T"))
+            return false;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          openTabsPicker("all");
+          return true;
+        case ":":
+          if (!keyEnabled("colon"))
+            return false;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          openExCommandPicker();
+          return true;
+        case "x":
+          if (!keyEnabled("x"))
+            return false;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          try {
+            gBrowser.removeTab(gBrowser.selectedTab);
+          } catch {}
+          return true;
+        case "o":
+          if (!keyEnabled("o"))
+            return false;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          activateUrlbar("current");
+          return true;
+        case "O":
+          if (!keyEnabled("O"))
+            return false;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          activateUrlbar("newTab");
+          return true;
+        case "`":
+          if (!keyEnabled("backtick"))
+            return false;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          toggleLastTab();
+          return true;
+        case "h":
+          if (!keyEnabled("h"))
+            return false;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          try {
+            gBrowser.selectedBrowser.goBack();
+          } catch {}
+          return true;
+        case "l":
+          if (!keyEnabled("l"))
+            return false;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          try {
+            gBrowser.selectedBrowser.goForward();
+          } catch {}
+          return true;
+        case "j":
+          if (!keyEnabled("j"))
+            return false;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          if (e.repeat)
+            return true;
+          try {
+            gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStart", { dy: 1 });
+          } catch {}
+          return true;
+        case "k":
+          if (!keyEnabled("k"))
+            return false;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          if (e.repeat)
+            return true;
+          try {
+            gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStart", { dy: -1 });
+          } catch {}
+          return true;
+        case "e":
+          if (!keyEnabled("e"))
+            return false;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          try {
+            const cur = Services.prefs.getBoolPref("pfx.sidebar.compact", false);
+            Services.prefs.setBoolPref("pfx.sidebar.compact", !cur);
+          } catch {}
+          return true;
+        case "?":
+          if (!keyEnabled("question"))
+            return false;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          toggleWhichKey();
+          return true;
+      }
+      return false;
+    }
     function setupGlobalKeys() {
       currentSelectedTab = gBrowser.selectedTab;
       gBrowser.tabContainer.addEventListener("TabSelect", (e) => {
@@ -2997,101 +3232,40 @@
           return;
         if (a && (a.closest?.("#urlbar") || a.closest?.("findbar") || a.closest?.(".pfx-search-input") || a.closest?.(".pfx-picker")))
           return;
-        if (!e.ctrlKey && !e.altKey && !e.metaKey) {
-          switch (e.key) {
-            case "t":
-              if (!keyEnabled("t"))
-                break;
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              openTabsPicker("current");
-              return;
-            case "T":
-              if (!keyEnabled("T"))
-                break;
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              openTabsPicker("all");
-              return;
-            case ":":
-              if (!keyEnabled("colon"))
-                break;
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              openExCommandPicker();
-              return;
-            case "x":
-              if (!keyEnabled("x"))
-                break;
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              try {
-                gBrowser.removeTab(gBrowser.selectedTab);
-              } catch {}
-              return;
-            case "o":
-              if (!keyEnabled("o"))
-                break;
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              activateUrlbar("current");
-              return;
-            case "O":
-              if (!keyEnabled("O"))
-                break;
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              activateUrlbar("newTab");
-              return;
-            case "`":
-              if (!keyEnabled("backtick"))
-                break;
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              toggleLastTab();
-              return;
-            case "h":
-              if (!keyEnabled("h"))
-                break;
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              try {
-                gBrowser.selectedBrowser.goBack();
-              } catch {}
-              return;
-            case "l":
-              if (!keyEnabled("l"))
-                break;
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              try {
-                gBrowser.selectedBrowser.goForward();
-              } catch {}
-              return;
-            case "j":
-              if (!keyEnabled("j"))
-                break;
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              if (e.repeat)
-                return;
-              try {
-                gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStart", { dy: 1 });
-              } catch {}
-              return;
-            case "k":
-              if (!keyEnabled("k"))
-                break;
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              if (e.repeat)
-                return;
-              try {
-                gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStart", { dy: -1 });
-              } catch {}
-              return;
-          }
+        if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") {
+          return;
         }
+        if (e.key === "Escape" && whichKeyEl && !whichKeyEl.hidden) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          hideWhichKey();
+          return;
+        }
+        const leader = leaderKey();
+        if (leader !== null) {
+          if (!leaderArmed) {
+            if (e.key === leader) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              armLeader();
+            }
+            return;
+          }
+          if (e.key === leader || e.key === "Escape") {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            disarmLeader();
+            return;
+          }
+          const handled = tryDispatchBinding(e);
+          disarmLeader();
+          if (!handled) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+          return;
+        }
+        tryDispatchBinding(e);
       }, true);
       document.addEventListener("keyup", (e) => {
         if (e.key !== "j" && e.key !== "k")
@@ -3186,31 +3360,6 @@
         pendingCtrlW = true;
         chordTimer = setTimeout(() => {
           pendingCtrlW = false;
-        }, CHORD_TIMEOUT);
-        return true;
-      }
-      if (pendingSpace === "w") {
-        pendingSpace = false;
-        clearTimeout(chordTimer);
-        paneSwitch(e.key);
-        return true;
-      }
-      if (pendingSpace === true) {
-        pendingSpace = false;
-        clearTimeout(chordTimer);
-        if (e.key === "w") {
-          pendingSpace = "w";
-          chordTimer = setTimeout(() => {
-            pendingSpace = false;
-          }, CHORD_TIMEOUT);
-          return true;
-        }
-        return true;
-      }
-      if (e.key === " ") {
-        pendingSpace = true;
-        chordTimer = setTimeout(() => {
-          pendingSpace = false;
         }, CHORD_TIMEOUT);
         return true;
       }
@@ -3533,7 +3682,8 @@
       { name: "sessions", description: "Picker over auto-saved sessions", takesArgs: false },
       { name: "history", description: "Picker over the full event log", takesArgs: true },
       { name: "blacklist", description: "Disable palefox keys on a site (or `list`/`remove`)", takesArgs: true },
-      { name: "unblacklist", description: "Re-enable palefox keys on a site", takesArgs: true }
+      { name: "unblacklist", description: "Re-enable palefox keys on a site", takesArgs: true },
+      { name: "help", description: "Show the keymap help panel", takesArgs: false }
     ];
     function openExCommandPicker() {
       const items = EX_COMMANDS.map((cmd) => ({
@@ -3749,6 +3899,10 @@
             break;
           }
           modelineMsg(blacklistRemove(host) ? `Removed: ${host}` : `Not in blacklist: ${host}`, 3000);
+          break;
+        }
+        case "help": {
+          toggleWhichKey();
           break;
         }
         case "history": {
@@ -4156,6 +4310,7 @@
       activateVim,
       moveCursor,
       focusPanel,
+      blurPanel,
       createModeline,
       setupVimKeys,
       setupGlobalKeys,

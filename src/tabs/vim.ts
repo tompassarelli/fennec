@@ -75,6 +75,11 @@ export type VimAPI = {
   readonly moveCursor: (delta: number) => boolean;
   /** Give the tree panel keyboard focus. Idempotent. */
   readonly focusPanel: () => void;
+  /** Deactivate the tree panel keyboard mode. The vim panel handler bails
+   *  when `!panelActive`, letting setupGlobalKeys process keys (chrome
+   *  scope leader / bindings). Tests use this to put the chrome window
+   *  into a known "panel inactive" state. */
+  readonly blurPanel: () => void;
 
   /** One-time init: build the modeline DOM at the bottom of the window. */
   readonly createModeline: () => void;
@@ -127,7 +132,6 @@ export function makeVim(deps: VimDeps): VimAPI {
   let chord: string | null = null;
   let chordTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let pendingCtrlW = false;
-  let pendingSpace: boolean | string = false; // false | true | "w"
 
   // Cursor-handoff flag: newTabBelow / cloneAsSibling set it; onTabOpen consumes
   // it to put the cursor on the freshly created row.
@@ -460,9 +464,7 @@ export function makeVim(deps: VimDeps): VimAPI {
     const msgLabel = document.getElementById("pfx-modeline-msg");
 
     let pending = "";
-    if (pendingSpace === true) pending = "SPC-";
-    else if (pendingSpace === "w") pending = "SPC w-";
-    else if (pendingCtrlW) pending = "C-w-";
+    if (pendingCtrlW) pending = "C-w-";
     else if (chord === "g") pending = "g-";
 
     if (modeLabel) modeLabel.setAttribute("value", "");
@@ -505,7 +507,6 @@ export function makeVim(deps: VimDeps): VimAPI {
     panelActive = false;
     chord = null;
     pendingCtrlW = false;
-    pendingSpace = false;
     clearTimeout(chordTimer);
 
     if (isHorizontal() && hzExpandedRoot) {
@@ -526,29 +527,40 @@ export function makeVim(deps: VimDeps): VimAPI {
   // because content lives in a separate process — that's Phase 2 work
   // (frame script + messaging). For now: chrome-area only.
   //
-  // The keymap (per the user's vimium-replacement plan):
+  // The keymap — bare-key by default (Firefox doesn't already claim chrome
+  // single-letters the way vim/emacs claim them in normal mode):
   //
-  //   t           open tabs picker for THIS chrome window
-  //   T           open tabs picker for ALL chrome windows (shift = broader scope —
-  //               same convention as vim's b/B, Doom's SPC b b / SPC b B)
-  //   h / l       history back / forward (vim left / right)
-  //   j / k       scroll page down / up (vim down / up). When the vim
-  //               panel is active, j/k navigate the cursor instead —
-  //               setupVimKeys intercepts first.
-  //   :           discoverable ex-command picker — shows all commands,
-  //               filters as you type, Enter selects + opens modeline pre-filled
-  //   :           open spotlight ex-input
-  //   `           toggle to last selected tab
-  //   o           floating urlbar, current-tab intent (drawer/urlbar.ts)
-  //   O           floating urlbar, new-tab intent — Enter spawns in new tab
-  //   x           close current tab
-  //   /           NOT intercepted — Firefox's native find owns it
-  //   b / B       (Phase 1b — bookmarks picker, separate push)
+  //   t    open tabs picker for THIS chrome window
+  //   T    open tabs picker for ALL chrome windows
+  //   h    history back   (vim left)
+  //   l    history forward (vim right)
+  //   j    scroll page down (smooth, while held)
+  //   k    scroll page up   (smooth, while held)
+  //   e    toggle compact mode
+  //   :    ex-command picker (vim convention)
+  //   `    toggle to last selected tab
+  //   o    floating urlbar, current-tab intent (drawer/urlbar.ts)
+  //   O    floating urlbar, new-tab intent — Enter spawns in new tab
+  //   x    close current tab
+  //   /    NOT intercepted — Firefox's native find owns it
   //
-  // Composability (CSS-layers inspired): every binding is gated on a pref
-  // `pfx.keys.<key>.enabled` (default true). Users can disable any palefox
-  // binding to let vimium/tridactyl/Firefox-native take it. Set the pref
-  // to false in about:config to opt out per-key without uninstalling.
+  // When the vim panel is active, j/k/h/l navigate the cursor instead
+  // (setupVimKeys intercepts first; the panel is its own modal mode that
+  // owns its keys).
+  //
+  // Per-site collisions are handled by `pfx.keys.blacklist` (managed via
+  // `:blacklist` / `:unblacklist`) — disable all palefox keys for sites
+  // that need their own j/k/etc. (Linear, GitHub, Notion).
+  //
+  // Optional leader prefix:
+  //   pfx.keys.useLeader = true   (default false)
+  //   pfx.keys.leader    = " "    (Space; any single key works)
+  // When useLeader is on, leader GATES every binding uniformly — bare keys
+  // stop firing, including `:` (must use `<leader>:`). `<leader>?` toggles
+  // the discoverability help panel.
+  //
+  // Per-binding `pfx.keys.<key>.enabled` (default true) opts a binding out
+  // entirely so vimium / tridactyl / Firefox-native take it.
   //
   // Originally also had Alt+X (Meta-X alias for `:`) but on Windows it's
   // Firefox's File→Exit accesskey; dispatching it crashes the chrome
@@ -557,6 +569,20 @@ export function makeVim(deps: VimDeps): VimAPI {
   /** Tracks the previously-selected tab so backtick can toggle. */
   let lastTab: Tab | null = null;
   let currentSelectedTab: Tab | null = null;
+
+  // -----------------------------------------------------------------
+  // Leader-key state — see "leader mode" comments below setupGlobalKeys.
+  // -----------------------------------------------------------------
+  let leaderArmed = false;
+  let leaderTimer: ReturnType<typeof setTimeout> | null = null;
+  let whichKeyEl: HTMLElement | null = null;
+  // Focus saved across leader-arm so we can restore it on disarm. While
+  // armed, focus is parked on a chrome-only stash element so the next
+  // keystroke routes to chrome (not into the content browsing context),
+  // protecting the leader chord from page-side keydown listeners on sites
+  // like Linear / GitHub.
+  let leaderPrevFocus: HTMLElement | null = null;
+  let leaderFocusStash: HTMLElement | null = null;
 
   /** Build picker items from the live tab tree.
    *
@@ -653,12 +679,38 @@ export function makeVim(deps: VimDeps): VimAPI {
     });
   }
 
-  // Both o/O route through src/drawer/urlbar.ts via the pfx-urlbar-activate
-  // CustomEvent. The drawer owns the floating decoration + focus; tabs just
-  // declares intent. New-tab spawning happens on Enter (drawer intercepts
-  // and re-dispatches with altKey=true, hitting Firefox's open-in-new-tab
-  // path). Empty Esc means no tab spawned — the user just dismissed.
+  // Both o/O replicate what Ctrl+L does: focus + select the urlbar AND open
+  // the suggestion view (top-sites / history / bookmarks). Calling
+  // `gURLBar.focus() + .select()` alone (older implementation) only handled
+  // focus, so `o` showed an empty urlbar.
+  //
+  // The view opens via `gURLBar.view.autoOpen({ event })`. Critical: autoOpen
+  // requires `event.type` to be `"mousedown"` or `"command"` — anything else
+  // returns false silently. (UrlbarView.sys.mjs::autoOpen line ~683.) When
+  // Ctrl+L hits Firefox, the XUL <command id="Browser:OpenLocation">'s
+  // command event is what autoOpen sees. We synthesize an Event of type
+  // "command" so autoOpen takes the same path.
+  //
+  // After the view is primed, our pfx-urlbar-activate CustomEvent is
+  // dispatched so drawer/urlbar.ts adds the floating decoration. newTab
+  // intent: setting pfx-urlbar-intent="new-tab" makes drawer/urlbar.ts
+  // intercept Enter and re-dispatch with altKey=true (Firefox's
+  // open-in-new-tab path).
   function activateUrlbar(intent: "current" | "newTab"): void {
+    try {
+      const u = (window as unknown as {
+        gURLBar?: {
+          focus?(): void;
+          select?(): void;
+          view?: { autoOpen?(opts: { event: Event }): boolean };
+        };
+      }).gURLBar;
+      if (u) {
+        u.focus?.();
+        u.select?.();
+        u.view?.autoOpen?.({ event: new Event("command") });
+      }
+    } catch {}
     document.dispatchEvent(new CustomEvent("pfx-urlbar-activate", {
       detail: { intent },
     }));
@@ -779,6 +831,271 @@ export function makeVim(deps: VimDeps): VimAPI {
     return true;
   }
 
+  // =============================================================================
+  // LEADER (optional, opt-in)
+  // =============================================================================
+  //
+  // Two prefs:
+  //   pfx.keys.useLeader  (bool, default false) — turn leader gating on/off
+  //   pfx.keys.leader     (string, default " ") — which key arms the leader
+  //
+  // Default off: chrome scope doesn't have the single-key collision problem
+  // vim/emacs have in normal mode. Bare keys dispatch directly. Per-site
+  // collisions are handled by `pfx.keys.blacklist`.
+  //
+  // When useLeader = true:
+  //   - Bare keys do NOT dispatch — must go through `<leader>key`.
+  //   - `<leader>?` shows the discoverability help panel.
+  //   - The leader chord is protected from page-side listeners by parking
+  //     focus on a hidden chrome-only stash (see armLeader).
+  //   - `:` still bypasses the gate (vim convention).
+
+  function leaderKey(): string | null {
+    if (!Services.prefs.getBoolPref("pfx.keys.useLeader", false)) return null;
+    const v = Services.prefs.getStringPref("pfx.keys.leader", " ");
+    return v.length === 0 ? null : v;
+  }
+
+  function leaderTimeoutMs(): number {
+    return Services.prefs.getIntPref("pfx.keys.leader_timeout", 1500);
+  }
+
+  /** Bindings reachable via leader. Pairs with the dispatch switch in
+   *  setupGlobalKeys. Adding a binding here surfaces it in the help panel
+   *  (which-key) when the user opts in via `<leader>?`. */
+  const LEADER_BINDINGS: ReadonlyArray<{ key: string; desc: string }> = [
+    { key: "t", desc: "tabs (this window)" },
+    { key: "T", desc: "tabs (all windows)" },
+    { key: "o", desc: "urlbar" },
+    { key: "O", desc: "urlbar (new tab)" },
+    { key: "x", desc: "close tab" },
+    { key: "`", desc: "last tab" },
+    { key: "h", desc: "history back" },
+    { key: "l", desc: "history forward" },
+    { key: "j", desc: "scroll down" },
+    { key: "k", desc: "scroll up" },
+    { key: "e", desc: "toggle compact mode" },
+    { key: "?", desc: "show this help" },
+    // `:` is intentionally NOT here — special-cased to dispatch without
+    // a leader (vim convention). Listed in the panel's footer below.
+  ];
+
+  function whichKeyEnsure(): HTMLElement {
+    if (whichKeyEl && whichKeyEl.isConnected) return whichKeyEl;
+    const el = document.createElement("div");
+    el.id = "pfx-which-key";
+    el.hidden = true;
+
+    const header = document.createElement("div");
+    header.className = "pfx-wk-header";
+    header.textContent = "leader";
+    el.appendChild(header);
+
+    for (const b of LEADER_BINDINGS) {
+      if (!keyEnabled(bindingPrefName(b.key))) continue;
+      const row = document.createElement("div");
+      row.className = "pfx-wk-row";
+      const k = document.createElement("span");
+      k.className = "pfx-wk-key";
+      k.textContent = b.key === " " ? "Space" : b.key;
+      const d = document.createElement("span");
+      d.className = "pfx-wk-desc";
+      d.textContent = b.desc;
+      row.appendChild(k);
+      row.appendChild(d);
+      el.appendChild(row);
+    }
+
+    document.documentElement.appendChild(el);
+    whichKeyEl = el;
+    return el;
+  }
+
+  /** Map binding key character to its `pfx.keys.<name>.enabled` pref name.
+   *  Mirrors the keyEnabled() calls in the dispatch switch. */
+  function bindingPrefName(key: string): string {
+    switch (key) {
+      case ":": return "colon";
+      case "`": return "backtick";
+      default:  return key;
+    }
+  }
+
+  function ensureLeaderFocusStash(): HTMLElement {
+    if (leaderFocusStash && leaderFocusStash.isConnected) return leaderFocusStash;
+    // Hidden chrome-only div. Focusable via tabindex but off-screen with no
+    // visual affordance. NOT an <input> — the global keymap bails on focused
+    // INPUT/TEXTAREA, which would self-defeat the focus-stash trick.
+    const el = document.createElement("div");
+    el.id = "pfx-leader-focus-stash";
+    el.setAttribute("aria-hidden", "true");
+    el.setAttribute("tabindex", "-1");
+    el.style.position = "fixed";
+    el.style.top = "-9999px";
+    el.style.left = "-9999px";
+    el.style.width = "1px";
+    el.style.height = "1px";
+    el.style.opacity = "0";
+    el.style.pointerEvents = "none";
+    document.documentElement.appendChild(el);
+    leaderFocusStash = el;
+    return el;
+  }
+
+  function armLeader(): void {
+    leaderArmed = true;
+    if (leaderTimer !== null) clearTimeout(leaderTimer);
+    leaderTimer = setTimeout(() => disarmLeader(), leaderTimeoutMs());
+
+    // Park focus on a chrome-only stash so the next keystroke (the user's
+    // chord completion) routes to chrome — not into the content process.
+    // Without this, sites like Linear's window-level keydown listeners
+    // would still fire on the chord key in parallel with our dispatch.
+    // Saving the old focus lets disarmLeader restore it.
+    const a = document.activeElement as HTMLElement | null;
+    if (a && a !== leaderFocusStash) leaderPrevFocus = a;
+    try { ensureLeaderFocusStash().focus(); } catch {}
+
+    // No which-key panel here — Emacs / Helix style. The hot path is
+    // silent. Discoverability is opt-in via `<leader>?`.
+  }
+
+  function disarmLeader(): void {
+    leaderArmed = false;
+    if (leaderTimer !== null) {
+      clearTimeout(leaderTimer);
+      leaderTimer = null;
+    }
+    // Restore focus to wherever it was before leader armed. Skip if a
+    // dispatched binding already moved focus elsewhere (urlbar, picker
+    // input, etc.) — only restore when our stash is still focused.
+    try {
+      if (leaderPrevFocus && document.activeElement === leaderFocusStash) {
+        leaderPrevFocus.focus?.();
+      }
+    } catch {}
+    leaderPrevFocus = null;
+    // Don't auto-hide the help panel here — it has its own lifecycle
+    // (Esc / second `<leader>?`) so the user can dispatch a binding
+    // while keeping the help reference visible.
+  }
+
+  function toggleWhichKey(): void {
+    const el = whichKeyEnsure();
+    el.hidden = !el.hidden;
+  }
+
+  function hideWhichKey(): void {
+    if (whichKeyEl) whichKeyEl.hidden = true;
+  }
+
+  /** Try to dispatch a keydown event as a palefox binding. Returns true if
+   *  the event was handled (preventDefault + stopImmediatePropagation
+   *  already applied). Pure dispatch — does NOT manage leader state.
+   *
+   *  Guards (privileged URI / content focus / blacklist / chrome inputs)
+   *  are checked by the caller, so this function trusts that we're free
+   *  to dispatch. */
+  function tryDispatchBinding(e: KeyboardEvent): boolean {
+    if (e.ctrlKey || e.altKey || e.metaKey) return false;
+    switch (e.key) {
+      case "t":
+        if (!keyEnabled("t")) return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        openTabsPicker("current");
+        return true;
+      case "T":
+        if (!keyEnabled("T")) return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        openTabsPicker("all");
+        return true;
+      case ":":
+        if (!keyEnabled("colon")) return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        openExCommandPicker();
+        return true;
+      case "x":
+        if (!keyEnabled("x")) return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        try { gBrowser.removeTab(gBrowser.selectedTab); } catch {}
+        return true;
+      case "o":
+        if (!keyEnabled("o")) return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        activateUrlbar("current");
+        return true;
+      case "O":
+        if (!keyEnabled("O")) return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        activateUrlbar("newTab");
+        return true;
+      case "`":
+        if (!keyEnabled("backtick")) return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        toggleLastTab();
+        return true;
+      case "h":
+        if (!keyEnabled("h")) return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        try { gBrowser.selectedBrowser.goBack(); } catch {}
+        return true;
+      case "l":
+        if (!keyEnabled("l")) return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        try { gBrowser.selectedBrowser.goForward(); } catch {}
+        return true;
+      case "j":
+        if (!keyEnabled("j")) return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.repeat) return true;
+        try {
+          gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStart", { dy: 1 });
+        } catch {}
+        return true;
+      case "k":
+        if (!keyEnabled("k")) return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.repeat) return true;
+        try {
+          gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStart", { dy: -1 });
+        } catch {}
+        return true;
+      case "e":
+        // Toggle compact mode — flips `pfx.sidebar.compact`. The compact-mode
+        // factory in src/drawer/compact.ts observes this pref and reacts.
+        if (!keyEnabled("e")) return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        try {
+          const cur = Services.prefs.getBoolPref("pfx.sidebar.compact", false);
+          Services.prefs.setBoolPref("pfx.sidebar.compact", !cur);
+        } catch {}
+        return true;
+      case "?":
+        // Toggle the help panel. Reachable bare when useLeader=false,
+        // and as `<leader>?` when useLeader=true. Sites that want their
+        // own `?` shortcut should be added to `pfx.keys.blacklist`.
+        if (!keyEnabled("question")) return false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        toggleWhichKey();
+        return true;
+      // / intentionally NOT bound — Firefox's find-as-you-type owns it.
+    }
+    return false;
+  }
+
   /** Wire the global keydown listener + tab-toggle tracking. Called once
    *  from the orchestrator's init. */
   function setupGlobalKeys(): void {
@@ -802,12 +1119,7 @@ export function makeVim(deps: VimDeps): VimAPI {
       // about:home / about:blank / regular http(s)) are unaffected.
       // See PRIVILEGED_BAIL_URI_PREFIXES above.
       if (isPrivilegedURI()) return;
-      // Content's focused element is editable (input / textarea /
-      // contentEditable / role=textbox|application). Bail. State comes
-      // from the content_focus.ts frame script — same isEditable logic
-      // Vimium uses (lib/dom_utils.js), bridged across the e10s boundary
-      // via the message manager. Without this, plain `o` typed into a
-      // page chat box would close-tab-and-open-urlbar instead of typing.
+      // Content's focused element is editable — bail.
       if (contentFocus.contentInputFocused()) return;
       // Per-site escape hatch — let the page own its keys without uninstalling
       // palefox. Toggle via `:blacklist` / `:unblacklist`.
@@ -821,106 +1133,53 @@ export function makeVim(deps: VimDeps): VimAPI {
       )) return;
       if (a && (a.closest?.("#urlbar") || a.closest?.("findbar") || a.closest?.(".pfx-search-input") || a.closest?.(".pfx-picker"))) return;
 
-      // No-modifier global hotkeys (per-binding pref-gated).
-      if (!e.ctrlKey && !e.altKey && !e.metaKey) {
-        switch (e.key) {
-          case "t":
-            if (!keyEnabled("t")) break;
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            openTabsPicker("current");
-            return;
-          case "T":
-            // Vim/Doom convention: shift escalates scope.
-            // `t` = current window picker, `T` = every chrome window picker.
-            // Mirrors vim's b/B (word/WORD) and Doom's SPC b b / SPC b B.
-            if (!keyEnabled("T")) break;
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            openTabsPicker("all");
-            return;
-          case ":":
-            // Discoverable: open the ex-command picker (shows ALL known
-            // commands by default, filters as the user types). Selecting
-            // one opens the freeform ex-input pre-filled with that command.
-            if (!keyEnabled("colon")) break;
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            openExCommandPicker();
-            return;
-          case "x":
-            if (!keyEnabled("x")) break;
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            try { gBrowser.removeTab(gBrowser.selectedTab); } catch {}
-            return;
-          case "o":
-            if (!keyEnabled("o")) break;
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            activateUrlbar("current");
-            return;
-          case "O":
-            if (!keyEnabled("O")) break;
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            activateUrlbar("newTab");
-            return;
-          case "`":
-            if (!keyEnabled("backtick")) break;
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            toggleLastTab();
-            return;
-          case "h":
-            // Vim convention: h is left → history back.
-            if (!keyEnabled("h")) break;
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            try { gBrowser.selectedBrowser.goBack(); } catch {}
-            return;
-          case "l":
-            // Vim convention: l is right → history forward.
-            if (!keyEnabled("l")) break;
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            try { gBrowser.selectedBrowser.goForward(); } catch {}
-            return;
-          case "j":
-            // Vim convention: j is down → scroll page down. Note this case
-            // is unreachable when the vim panel is active (setupVimKeys
-            // intercepts first and routes j to cursor-down). Fires only on
-            // content-body focus where the user expects page scroll.
-            //
-            // Implementation: chrome can't call content.scrollBy directly
-            // across e10s, and goDoCommand("cmd_scrollLineDown") doesn't
-            // route to content scroll. We send Palefox:ScrollStart to the
-            // frame script in content-focus.ts which drives a content-scope
-            // requestAnimationFrame loop. Skip on e.repeat — OS auto-repeat
-            // would re-trigger and double-start; the rAF loop is already
-            // running. ScrollStop fires from the document-level keyup
-            // listener below.
-            if (!keyEnabled("j")) break;
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            if (e.repeat) return;
-            try {
-              gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStart", { dy: 1 });
-            } catch {}
-            return;
-          case "k":
-            // Vim convention: k is up → scroll page up.
-            if (!keyEnabled("k")) break;
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            if (e.repeat) return;
-            try {
-              gBrowser.selectedBrowser.messageManager?.sendAsyncMessage("Palefox:ScrollStart", { dy: -1 });
-            } catch {}
-            return;
-          // / intentionally NOT bound — Firefox's find-as-you-type owns it.
-        }
+      // Modifier-only keys (Shift/Ctrl/Alt/Meta tapped alone) don't
+      // disarm leader and aren't bindings. Let them through.
+      if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") {
+        return;
       }
+
+      // Help panel is its own modal-ish surface. Esc hides it, regardless
+      // of leader state. Falls through to leader-Esc handling below if the
+      // panel wasn't visible.
+      if (e.key === "Escape" && whichKeyEl && !whichKeyEl.hidden) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        hideWhichKey();
+        return;
+      }
+
+      const leader = leaderKey();
+      if (leader !== null) {
+        // Leader is configured → it GATES every binding (including `:` for
+        // consistency — `<leader>:` is the chord). Per-site collisions
+        // are protected by focus-shifting in armLeader.
+        if (!leaderArmed) {
+          if (e.key === leader) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            armLeader();
+          }
+          return;
+        }
+        // Armed branch.
+        if (e.key === leader || e.key === "Escape") {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          disarmLeader();
+          return;
+        }
+        const handled = tryDispatchBinding(e);
+        disarmLeader();
+        if (!handled) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+        return;
+      }
+
+      // No leader configured → bare keys dispatch (default behavior).
+      tryDispatchBinding(e);
     }, true);
 
     // Pair to the j/k ScrollStart dispatch above. Sending ScrollStop on
@@ -1044,28 +1303,13 @@ export function makeVim(deps: VimDeps): VimAPI {
       return true;
     }
 
-    // --- SPC+w pane chords (SPC → w → h/l/w) ---
-    if (pendingSpace === "w") {
-      pendingSpace = false;
-      clearTimeout(chordTimer);
-      paneSwitch(e.key);
-      return true;
-    }
-    if (pendingSpace === true) {
-      pendingSpace = false;
-      clearTimeout(chordTimer);
-      if (e.key === "w") {
-        pendingSpace = "w";
-        chordTimer = setTimeout(() => { pendingSpace = false; }, CHORD_TIMEOUT);
-        return true;
-      }
-      return true; // unknown SPC chord, discard
-    }
-    if (e.key === " ") {
-      pendingSpace = true;
-      chordTimer = setTimeout(() => { pendingSpace = false; }, CHORD_TIMEOUT);
-      return true;
-    }
+    // SPC chord prefix removed: chrome-scope leader (setupGlobalKeys) owns
+    // Space now. Returning false here lets Space fall through to setupVimKeys'
+    // unbound-key path, which calls blurPanel() + focuses content. Then the
+    // next keystroke goes through setupGlobalKeys. Net effect: pressing Space
+    // while the panel is active deactivates the panel and arms the chrome
+    // leader, mirroring "the leader works everywhere" UX.
+    // Pane-switch keymap still lives at Ctrl+W (see below).
 
     // --- Regular chords (gg, gC) ---
     if (chord) {
@@ -1358,6 +1602,7 @@ export function makeVim(deps: VimDeps): VimAPI {
     { name: "history",    description: "Picker over the full event log",         takesArgs: true },
     { name: "blacklist",  description: "Disable palefox keys on a site (or `list`/`remove`)", takesArgs: true },
     { name: "unblacklist",description: "Re-enable palefox keys on a site",       takesArgs: true },
+    { name: "help",       description: "Show the keymap help panel",             takesArgs: false },
   ];
 
   /** Discoverable picker over ex-commands. Triggered by the global `:` key.
@@ -1574,6 +1819,10 @@ export function makeVim(deps: VimDeps): VimAPI {
         const host = args[1]?.trim() || currentHost();
         if (!host) { modelineMsg("No host to remove", 3000); break; }
         modelineMsg(blacklistRemove(host) ? `Removed: ${host}` : `Not in blacklist: ${host}`, 3000);
+        break;
+      }
+      case "help": {
+        toggleWhichKey();
         break;
       }
       case "history": {
@@ -2033,7 +2282,7 @@ export function makeVim(deps: VimDeps): VimAPI {
   // ---------- Public API ----------------------------------------------------
 
   return {
-    setCursor, activateVim, moveCursor, focusPanel,
+    setCursor, activateVim, moveCursor, focusPanel, blurPanel,
     createModeline, setupVimKeys, setupGlobalKeys,
     cloneAsSibling, startRename,
     consumePendingCursorMove,

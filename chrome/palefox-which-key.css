@@ -1,0 +1,68 @@
+/* palefox-which-key.css — leader-mode discoverability panel
+ *
+ * Shown when the user presses the leader key (default Space). Lists the
+ * available bindings so leader-mode is self-documenting. Auto-hides on
+ * binding dispatch / Esc / leader-double-press / timeout.
+ *
+ * Element is created on demand by src/tabs/vim.ts and reused. */
+
+#pfx-which-key {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 10002 !important;
+  background-color: var(--pfx-bg-elevated) !important;
+  color: var(--pfx-fg) !important;
+  border: 1px solid var(--pfx-border) !important;
+  border-radius: 6px !important;
+  padding: 8px 10px !important;
+  font-family: ui-monospace, SFMono-Regular, monospace !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+  min-width: 220px !important;
+  max-height: 60vh !important;
+  overflow-y: auto !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25) !important;
+  pointer-events: none !important;
+}
+
+#pfx-which-key[hidden] {
+  display: none !important;
+}
+
+#pfx-which-key .pfx-wk-header {
+  font-weight: 600 !important;
+  color: var(--pfx-fg-muted) !important;
+  font-size: 11px !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  margin-bottom: 6px !important;
+  padding-bottom: 4px !important;
+  border-bottom: 1px solid var(--pfx-border) !important;
+}
+
+#pfx-which-key .pfx-wk-row {
+  display: flex !important;
+  gap: 10px !important;
+  align-items: baseline !important;
+}
+
+#pfx-which-key .pfx-wk-key {
+  display: inline-block !important;
+  min-width: 1.4em !important;
+  padding: 0 6px !important;
+  text-align: center !important;
+  background-color: color-mix(in srgb, var(--pfx-fg) 8%, transparent) !important;
+  border-radius: 3px !important;
+  color: var(--pfx-accent) !important;
+  font-weight: 600 !important;
+}
+
+#pfx-which-key .pfx-wk-desc {
+  color: var(--pfx-fg) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #pfx-which-key { transition: none !important; }
+}

@@ -11,6 +11,7 @@
  * doesn't require touching the user-facing entry point. */
 
 @import url("palefox-tabs.css");
+@import url("palefox-which-key.css");
 
 
 /* #region palette
