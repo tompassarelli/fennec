@@ -12,4 +12,8 @@ node_modules/
 .devenv/
 .direnv/
 *.tsbuildinfo
-config.generated.js
+# program/config.generated.js — was previously gitignored, but is now
+# tracked so flake-based Nix installs (where palefox is referenced as a
+# flake input in pure-evaluation mode) can include it. Contributors who
+# touch chrome/{utils,JS,CSS}/ must run `bun run build` and commit the
+# regenerated file in the same commit.
