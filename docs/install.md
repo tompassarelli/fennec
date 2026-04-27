@@ -37,26 +37,32 @@ Plus, in your Firefox application directory (requires sudo, root-owned):
 
 ## Backups & restoring
 
-Every install pass creates timestamped backups of anything it modifies, so
-you can always inspect or restore your previous state:
+Every install or uninstall run creates ONE timestamped backup directory
+in your profile, containing snapshots of everything that was modified.
+Each directory has a `README.txt` explaining its contents and exact
+restore commands for that snapshot.
 
-| Backup | Created when |
-|--------|--------------|
-| `<profile>/chrome.bak.<timestamp>/` | `chrome/` directory before wipe-and-replace of `utils/`, `JS/`, `CSS/` |
-| `<profile>/user.js.bak.<timestamp>` | `user.js` before any pref modification |
-| `<profile>/chrome/userChrome.css.legacy` | only when migrating from the old monolithic CSS layout |
-
-To restore your previous state:
-```bash
-cp -r <profile>/chrome.bak.<timestamp>/* <profile>/chrome/
-cp <profile>/user.js.bak.<timestamp> <profile>/user.js
+```
+<profile>/palefox-backup-<timestamp>/
+  README.txt    What's here, how to restore (specific to this snapshot)
+  chrome/       Pre-install snapshot of <profile>/chrome/ (only on install)
+  utils/        Pre-uninstall snapshot of chrome/utils/ (only on uninstall)
+  user.js       Pre-modification snapshot of user.js
+  prefs.js      Pre-modification snapshot of prefs.js
 ```
 
-To diff your current state against the previous one (e.g. to see which
-prefs we set):
+Why both `user.js` and `prefs.js` are backed up: we modify `user.js`
+directly (it's Firefox's force-apply layer), but Firefox writes our
+`user.js` values into `prefs.js` (its persistent pref storage) on
+startup. Backing up both gives you the full pre-palefox state.
+
+To diff your current prefs against the pre-install state:
 ```bash
-diff <profile>/user.js.bak.<timestamp> <profile>/user.js
+diff <profile>/palefox-backup-<timestamp>/user.js <profile>/user.js
 ```
+
+To restore everything from a backup, follow the README.txt inside that
+specific snapshot — paths and commands are pre-filled for your profile.
 
 ## Removing the legacy fx-autoconfig setup
 

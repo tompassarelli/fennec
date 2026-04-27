@@ -113,21 +113,19 @@ fi
 echo "Profile: $(basename "$profile")"
 chrome_dir="$profile/chrome"
 user_js="$profile/user.js"
+prefs_js="$profile/prefs.js"
 TS="$(date +%Y-%m-%d-%H%M%S)"
 
-# --- 1. Back up user.js ---
-if [ -f "$user_js" ]; then
-    backup="${user_js}.bak.${TS}"
-    cp "$user_js" "$backup"
-    echo "Backed up user.js → $(basename "$backup")"
-fi
-
-# --- 2. Back up chrome/utils/ ---
-if [ -d "$chrome_dir/utils" ]; then
-    backup_utils="$profile/chrome.utils.bak.${TS}"
-    cp -r "$chrome_dir/utils" "$backup_utils"
-    echo "Backed up chrome/utils/ → $(basename "$backup_utils")/"
-fi
+# --- 1. Backup root: one palefox-backup-<ts>/ dir, all snapshots inside ---
+# user.js: what we modify directly (strip userChromeJS.enabled line)
+# prefs.js: not modified, but contains values Firefox persisted from our
+#           prior user.js — snapshot so user has full pre-uninstall state
+# chrome/utils/: removed entirely; snapshot it before deleting
+BACKUP_DIR="$profile/palefox-backup-${TS}"
+mkdir -p "$BACKUP_DIR"
+[ -f "$user_js" ] && cp "$user_js" "$BACKUP_DIR/user.js"
+[ -f "$prefs_js" ] && cp "$prefs_js" "$BACKUP_DIR/prefs.js"
+[ -d "$chrome_dir/utils" ] && cp -r "$chrome_dir/utils" "$BACKUP_DIR/utils"
 
 # --- 3. Remove install-root bootstrap (sudo) ---
 case "$(uname -s)" in
@@ -181,12 +179,46 @@ if [ -f "$user_js" ] && grep -q '"userChromeJS\.enabled"' "$user_js"; then
     echo "Stripped userChromeJS.enabled from user.js"
 fi
 
+# Write README explaining the backup contents + restore steps.
+if [ -n "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]; then
+    cat > "$BACKUP_DIR/README.txt" << EOF
+palefox uninstall-fx-autoconfig backup — ${TS}
+Created by: uninstall-fx-autoconfig.sh
+
+Snapshot of files this script modified or removed. Restore individually
+or all at once.
+
+Contents (only present if it existed before uninstall):
+  user.js    Snapshot of <profile>/user.js before we stripped the
+             userChromeJS.enabled line.
+  prefs.js   Snapshot of <profile>/prefs.js before this uninstall run.
+             We don't write prefs.js directly, but it contains
+             palefox-set values Firefox persisted from past user.js
+             applications. After uninstall, those values linger in
+             prefs.js until you reset them via about:config — this
+             snapshot is your pre-uninstall pref state if you need it.
+  utils/     Snapshot of <profile>/chrome/utils/ before we removed it
+             (the fx-autoconfig loader machinery).
+
+Restore individually:
+  cp ./user.js  "$user_js"
+  cp ./prefs.js "$prefs_js"
+  cp -r ./utils "$chrome_dir/"
+
+Restore everything:
+  cp ./user.js "$user_js"
+  cp ./prefs.js "$prefs_js"
+  [ -d ./utils ] && cp -r ./utils "$chrome_dir/"
+
+To also restore the install-root bootstrap (if you want fx-autoconfig back):
+  re-run the palefox install.sh from the version you uninstalled from.
+EOF
+fi
+
 echo ""
 echo "Done. fx-autoconfig has been removed."
 echo ""
-echo "Backups (recover with cp if needed):"
-[ -n "${backup:-}" ] && echo "  $backup"
-[ -n "${backup_utils:-}" ] && echo "  $backup_utils/"
+echo "Backup: $BACKUP_DIR/"
 echo ""
 echo "Verify:"
 echo "  test ! -f \"$app_dir/config.js\" && echo OK_bootstrap"

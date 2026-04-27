@@ -71,24 +71,16 @@ if ($profiles.Count -eq 1) {
 Write-Host "Profile: $($profile.Name)"
 $chromeDir = Join-Path $profile.FullName "chrome"
 $userJs = Join-Path $profile.FullName "user.js"
+$prefsJs = Join-Path $profile.FullName "prefs.js"
+$utilsDir = Join-Path $chromeDir "utils"
 $ts = Get-Date -Format "yyyy-MM-dd-HHmmss"
 
-# --- 1. Back up user.js ---
-$userJsBackup = $null
-if (Test-Path $userJs) {
-    $userJsBackup = "${userJs}.bak.${ts}"
-    Copy-Item -Path $userJs -Destination $userJsBackup
-    Write-Host "Backed up user.js -> $(Split-Path $userJsBackup -Leaf)"
-}
-
-# --- 2. Back up chrome\utils\ ---
-$utilsBackup = $null
-$utilsDir = Join-Path $chromeDir "utils"
-if (Test-Path $utilsDir) {
-    $utilsBackup = Join-Path $profile.FullName "chrome.utils.bak.${ts}"
-    Copy-Item -Path $utilsDir -Destination $utilsBackup -Recurse
-    Write-Host "Backed up chrome\utils\ -> $(Split-Path $utilsBackup -Leaf)\"
-}
+# --- 1. Backup root: one palefox-backup-<ts>\ dir, all snapshots inside ---
+$backupDir = Join-Path $profile.FullName "palefox-backup-$ts"
+New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+if (Test-Path $userJs)  { Copy-Item -Path $userJs  -Destination (Join-Path $backupDir "user.js") }
+if (Test-Path $prefsJs) { Copy-Item -Path $prefsJs -Destination (Join-Path $backupDir "prefs.js") }
+if (Test-Path $utilsDir) { Copy-Item -Path $utilsDir -Destination (Join-Path $backupDir "utils") -Recurse }
 
 # --- 3. Remove install-root bootstrap ---
 if (Test-Path $appDir) {
@@ -122,12 +114,47 @@ if ((Test-Path $userJs) -and (Select-String -Path $userJs -Pattern '"userChromeJ
     Write-Host "Stripped userChromeJS.enabled from user.js"
 }
 
+# Write README explaining backup contents + restore steps.
+if ((Get-ChildItem $backupDir -Force | Measure-Object).Count -gt 0) {
+    $readme = @"
+palefox uninstall-fx-autoconfig backup — $ts
+Created by: uninstall-fx-autoconfig.ps1
+
+Snapshot of files this script modified or removed. Restore individually
+or all at once.
+
+Contents (only present if it existed before uninstall):
+  user.js    Snapshot of <profile>\user.js before we stripped the
+             userChromeJS.enabled line.
+  prefs.js   Snapshot of <profile>\prefs.js before this uninstall run.
+             We don't write prefs.js directly, but it contains
+             palefox-set values Firefox persisted from past user.js
+             applications. After uninstall, those values linger in
+             prefs.js until you reset them via about:config — this
+             snapshot is your pre-uninstall pref state if you need it.
+  utils\     Snapshot of <profile>\chrome\utils\ before we removed it
+             (the fx-autoconfig loader machinery).
+
+Restore individually:
+  Copy-Item .\user.js  '$userJs'
+  Copy-Item .\prefs.js '$prefsJs'
+  Copy-Item .\utils    '$chromeDir\' -Recurse
+
+Restore everything:
+  Copy-Item .\user.js  '$userJs'
+  Copy-Item .\prefs.js '$prefsJs'
+  if (Test-Path .\utils) { Copy-Item .\utils '$chromeDir\' -Recurse }
+
+To also restore the install-root bootstrap (if you want fx-autoconfig back):
+  re-run the palefox install.ps1 from the version you uninstalled from.
+"@
+    Set-Content -Path (Join-Path $backupDir "README.txt") -Value $readme
+}
+
 Write-Host ""
 Write-Host "Done. fx-autoconfig has been removed."
 Write-Host ""
-Write-Host "Backups (recover with Copy-Item if needed):"
-if ($userJsBackup) { Write-Host "  $userJsBackup" }
-if ($utilsBackup) { Write-Host "  $utilsBackup\" }
+Write-Host "Backup: $backupDir\"
 Write-Host ""
 Write-Host "Verify:"
 Write-Host "  if (-not (Test-Path '$appDir\config.js')) { Write-Host OK_bootstrap }"

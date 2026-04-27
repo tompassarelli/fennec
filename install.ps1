@@ -180,16 +180,20 @@ try {
         }
     }
 
-    # Backup existing chrome folder
-    if ((Test-Path $chromeDir) -and -not $noBackup) {
-        $timestamp = Get-Date -Format "yyyy-MM-dd-HHmmss"
-        $backupDir = Join-Path $profile.FullName "chrome.bak.$timestamp"
-        Write-Host "Backing up existing chrome folder to chrome.bak.$timestamp"
-        try {
-            Copy-Item -Path $chromeDir -Destination $backupDir -Recurse
-        } catch {
-            Write-Error "Failed to back up chrome folder."
-            exit 1
+    # Backup root: every install creates ONE palefox-backup-<timestamp>\ dir
+    # containing snapshots of everything we modify. User can restore individual
+    # files or the whole set. README.txt inside explains contents + restore.
+    $ts = Get-Date -Format "yyyy-MM-dd-HHmmss"
+    $backupDir = Join-Path $profile.FullName "palefox-backup-$ts"
+    if (-not $noBackup) {
+        New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+        if (Test-Path $chromeDir) {
+            try {
+                Copy-Item -Path $chromeDir -Destination (Join-Path $backupDir "chrome") -Recurse
+            } catch {
+                Write-Error "Failed to back up chrome folder."
+                exit 1
+            }
         }
     }
 
@@ -343,14 +347,17 @@ try {
 
     # Configure browser preferences in user.js
     $userJs = Join-Path $profile.FullName "user.js"
+    $prefsJs = Join-Path $profile.FullName "prefs.js"
 
-    # Back up user.js before any modification. Matches the chrome.bak.<ts>\
-    # pattern from earlier — the user can diff their previous prefs and copy
-    # back if they don't like our defaults. See docs/install.md restore section.
-    if (Test-Path $userJs) {
-        $userJsBackup = "${userJs}.bak.$(Get-Date -Format 'yyyy-MM-dd-HHmmss')"
-        Copy-Item -Path $userJs -Destination $userJsBackup
-        Write-Host "Backed up user.js -> $(Split-Path $userJsBackup -Leaf)"
+    # Back up user.js + prefs.js into the same palefox-backup-<ts>\ dir
+    # as the chrome snapshot. Either may be absent on a fresh profile.
+    if (-not $noBackup) {
+        if (Test-Path $userJs) {
+            Copy-Item -Path $userJs -Destination (Join-Path $backupDir "user.js")
+        }
+        if (Test-Path $prefsJs) {
+            Copy-Item -Path $prefsJs -Destination (Join-Path $backupDir "prefs.js")
+        }
     }
 
     function Set-BrowserPref {
@@ -400,6 +407,39 @@ try {
 
     # Default toolbar layout
     Set-BrowserPref "browser.uiCustomization.state" "'{`"placements`":{`"widget-overflow-fixed-list`":[`"fxa-toolbar-menu-button`",`"home-button`",`"alltabs-button`",`"firefox-view-button`"],`"unified-extensions-area`":[],`"nav-bar`":[`"sidebar-button`",`"back-button`",`"forward-button`",`"stop-reload-button`",`"customizableui-special-spring1`",`"vertical-spacer`",`"urlbar-container`",`"customizableui-special-spring2`",`"downloads-button`",`"unified-extensions-button`"],`"toolbar-menubar`":[`"menubar-items`"],`"TabsToolbar`":[`"tabbrowser-tabs`",`"new-tab-button`"],`"vertical-tabs`":[],`"PersonalToolbar`":[`"import-button`",`"personal-bookmarks`"]},`"seen`":[],`"dirtyAreaCache`":[],`"currentVersion`":23,`"newElementCount`":0}'"
+
+    # Write README explaining backup contents + restore steps.
+    if ((-not $noBackup) -and (Test-Path $backupDir) -and (Get-ChildItem $backupDir -Force | Measure-Object).Count -gt 0) {
+        $readme = @"
+palefox install backup — $ts
+Created by: install.ps1
+
+Snapshot of files palefox modified (or caused Firefox to modify) on this
+install run. Restore individually or all at once.
+
+Contents (only present if it existed before install):
+  chrome\    Snapshot of <profile>\chrome\ before palefox replaced
+             utils\, JS\, CSS\. Includes any custom userChrome.css,
+             user.css, or other userscripts you had.
+  user.js    Snapshot of <profile>\user.js (Firefox force-apply prefs)
+             before palefox modified it.
+  prefs.js   Snapshot of <profile>\prefs.js (Firefox's persistent pref
+             storage) before this install. We don't write prefs.js
+             directly, but Firefox writes our user.js values into it on
+             startup, so this captures the genuinely-pre-palefox state.
+
+Restore individually:
+  Copy-Item .\user.js     '$($profile.FullName)\user.js'
+  Copy-Item .\prefs.js    '$($profile.FullName)\prefs.js'
+  Copy-Item .\chrome\* '$chromeDir\' -Recurse -Force
+
+Restore everything:
+  Copy-Item .\* '$($profile.FullName)\' -Recurse -Force
+"@
+        Set-Content -Path (Join-Path $backupDir "README.txt") -Value $readme
+        Write-Host ""
+        Write-Host "Backup: $backupDir\"
+    }
 
     Write-Host "Done. Restart $browserName for changes to take effect."
 } finally {

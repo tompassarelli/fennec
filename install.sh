@@ -210,13 +210,18 @@ else
     fi
 fi
 
-# Backup existing chrome folder
-if [ -d "$chrome_dir" ] && [ "$NO_BACKUP" = false ]; then
-    backup_dir="$profile/chrome.bak.$(date +%Y-%m-%d-%H%M%S)"
-    echo "Backing up existing chrome folder to $(basename "$backup_dir")"
-    if ! cp -r "$chrome_dir" "$backup_dir"; then
-        echo "Error: Failed to back up chrome folder."
-        exit 1
+# Backup root: every install creates ONE palefox-backup-<timestamp>/ dir
+# containing snapshots of everything we modify. User can restore individual
+# files or the whole set. README.txt inside explains contents + restore.
+TS="$(date +%Y-%m-%d-%H%M%S)"
+BACKUP_DIR="$profile/palefox-backup-${TS}"
+if [ "$NO_BACKUP" = false ]; then
+    mkdir -p "$BACKUP_DIR"
+    if [ -d "$chrome_dir" ]; then
+        if ! cp -r "$chrome_dir" "$BACKUP_DIR/chrome"; then
+            echo "Error: Failed to back up chrome folder."
+            exit 1
+        fi
     fi
 fi
 
@@ -364,14 +369,13 @@ fi
 
 # Configure browser preferences in user.js
 user_js="$profile/user.js"
+prefs_js="$profile/prefs.js"
 
-# Back up user.js before any modification. Matches the chrome.bak.<ts>/
-# pattern from earlier — the user can diff their previous prefs and cp
-# back if they don't like our defaults. See docs/install.md restore section.
-if [ -f "$user_js" ]; then
-    user_js_backup="${user_js}.bak.$(date +%Y-%m-%d-%H%M%S)"
-    cp "$user_js" "$user_js_backup"
-    echo "Backed up user.js → $(basename "$user_js_backup")"
+# Back up user.js + prefs.js into the same palefox-backup-<TS>/ dir
+# as the chrome snapshot. Either may be absent on a fresh profile.
+if [ "$NO_BACKUP" = false ]; then
+    [ -f "$user_js" ] && cp "$user_js" "$BACKUP_DIR/user.js"
+    [ -f "$prefs_js" ] && cp "$prefs_js" "$BACKUP_DIR/prefs.js"
 fi
 
 set_pref() {
@@ -421,6 +425,39 @@ set_pref "browser.uiCustomization.state" "'{\"placements\":{\"widget-overflow-fi
 # GTK may send spurious leave events that break autohide
 if [ "$(uname -s)" = "Linux" ]; then
     set_pref "widget.gtk.ignore-bogus-leave-notify" 1
+fi
+
+# Write README explaining backup contents + restore steps. Only if backups
+# were made (NO_BACKUP not set, and there was something to back up).
+if [ "$NO_BACKUP" = false ] && [ -d "$BACKUP_DIR" ] && [ -n "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]; then
+    cat > "$BACKUP_DIR/README.txt" << EOF
+palefox install backup — ${TS}
+Created by: install.sh
+
+Snapshot of files palefox modified (or caused Firefox to modify) on this
+install run. Restore individually or all at once.
+
+Contents (only present if it existed before install):
+  chrome/    Snapshot of <profile>/chrome/ before palefox replaced
+             utils/, JS/, CSS/. Includes any custom userChrome.css,
+             user.css, or other userscripts you had.
+  user.js    Snapshot of <profile>/user.js (Firefox force-apply prefs)
+             before palefox modified it.
+  prefs.js   Snapshot of <profile>/prefs.js (Firefox's persistent pref
+             storage) before this install. We don't write prefs.js
+             directly, but Firefox writes our user.js values into it on
+             startup, so this captures the genuinely-pre-palefox state.
+
+Restore individually:
+  cp ./user.js     "$profile/user.js"
+  cp ./prefs.js    "$profile/prefs.js"
+  cp -r ./chrome/* "$chrome_dir/"
+
+Restore everything:
+  cp -r ./* "$profile/"
+EOF
+    echo ""
+    echo "Backup: $BACKUP_DIR/"
 fi
 
 echo "Done. Restart $BROWSER_NAME for changes to take effect."
