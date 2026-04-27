@@ -5,19 +5,16 @@
 // Without these, a future refactor that breaks the hash check (or accidentally
 // makes it permissive) would slip through unnoticed.
 //
-// Opt-in: set PALEFOX_TEST_BOOTSTRAP=1. The tests assume the dev's installed
-// bootstrap is the hash-pinned variant — if you see the tampering tests
-// fail with "expected pfxTest to be undefined", that means the stock
-// fx-autoconfig bootstrap is installed and didn't reject the tampered file.
-// Run `bun run build && ./install.sh` to install the hash-pinned bootstrap
-// (sudo prompt for the install-root copy).
+// These tests run against the test rig Firefox set up by
+// tools/test-driver/firefox-rig.ts, which has the hash-pinned bootstrap
+// installed in its (user-owned) install root. Marionette tests use a
+// fresh ephemeral profile per test, so tampering happens in the temp
+// profile and never touches the developer's daily Firefox.
 
 import { copyFile, readFile, writeFile, unlink, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { IntegrationTest } from "../../tools/test-driver/runner.ts";
 import type { MarionetteClient } from "../../tools/test-driver/marionette.ts";
-
-const ENABLED = process.env.PALEFOX_TEST_BOOTSTRAP === "1";
 
 async function pfxTestExposed(mn: MarionetteClient): Promise<boolean> {
   return await mn.executeScript<boolean>(
@@ -54,14 +51,12 @@ const tests: IntegrationTest[] = [
   {
     name: "bootstrap: positive control — palefox loads cleanly",
     async run(mn, ctx) {
-      if (!ENABLED) ctx.skip("set PALEFOX_TEST_BOOTSTRAP=1 to enable");
       await waitForPalefox(mn);
     },
   },
   {
     name: "bootstrap: tampered chrome/JS file → palefox refuses to load",
     async run(mn, ctx) {
-      if (!ENABLED) ctx.skip("set PALEFOX_TEST_BOOTSTRAP=1 to enable");
       const target = join(ctx.profilePath, "chrome", "JS", "palefox-tabs.uc.js");
       const backup = target + ".bak";
 
@@ -87,7 +82,6 @@ const tests: IntegrationTest[] = [
   {
     name: "bootstrap: extra .uc.js in chrome/JS → palefox refuses to load",
     async run(mn, ctx) {
-      if (!ENABLED) ctx.skip("set PALEFOX_TEST_BOOTSTRAP=1 to enable");
       const intruder = join(ctx.profilePath, "chrome", "JS", "z-intruder.uc.js");
       await writeFile(intruder, "// pretending to be a userscript\n");
 

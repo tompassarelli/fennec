@@ -73,6 +73,37 @@ uninstall backup AND later reinstall any palefox version or independent
 fx-autoconfig, the chain reconnects and the backdoor is active again.
 The README.txt inside each backup spells this out explicitly.
 
+## End-to-end install verification
+
+After running `./install.sh`, verify the hash-pinned bootstrap is
+actually in place (not the old vanilla fx-autoconfig):
+
+```bash
+# Linux — find the install root
+APP_DIR=$(dirname "$(readlink -f "$(which firefox)")")
+test -f "$APP_DIR/config.js" && echo "✓ bootstrap installed"
+grep -q PALEFOX_PINNED "$APP_DIR/config.js" && echo "✓ hash-pinned (not vanilla)"
+
+# Profile prefs
+PROFILE=~/.mozilla/firefox/*.default-release
+grep -q 'userChromeJS.enabled.*true' $PROFILE/user.js && echo "✓ loader gate enabled"
+grep -q 'toolkit.legacyUserProfileCustomizations.stylesheets.*false' $PROFILE/user.js && echo "✓ legacy CSS path off"
+```
+
+To exercise the gate end-to-end without touching your daily profile,
+use the test rig (no sudo, no impact on your real Firefox):
+
+```bash
+cd ~/code/palefox
+bun run test:rig:setup       # one-time, ~150MB download (or copy from Nix store on NixOS)
+bun run test:integration     # runs all tests including bootstrap-hash verification
+bun run test:rig             # interactive Firefox in a temp profile for manual validation
+```
+
+The full architecture, runtime sequence, threat model, and per-platform
+dev workflows are documented in
+[`docs/dev/loader-pipeline.md`](dev/loader-pipeline.md).
+
 ## Removing the legacy fx-autoconfig setup
 
 If you installed palefox before the safer-js-loader switch, your Firefox

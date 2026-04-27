@@ -29,6 +29,7 @@ import { readdir } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { connectMarionette, type MarionetteClient } from "./marionette.ts";
 import { createProfile, type TestProfile } from "./profile.ts";
+import { locateFirefox } from "./firefox-locator.ts";
 
 /** Throw a `SkipError` from a test body to mark the run as skipped (vs failed).
  *  The runner emits a `test:skip` event with the reason. Skipped tests don't
@@ -157,7 +158,10 @@ async function spawnFirefox(opts: {
 }
 
 export async function runAll(opts: RunnerOptions = {}): Promise<{ pass: number; fail: number; skip: number }> {
-  const firefoxBin = opts.firefoxBin ?? process.env.FIREFOX_BIN ?? "firefox";
+  // Firefox discovery via the cross-platform locator. Honors $FIREFOX_BIN
+  // first, then the test rig at ~/.cache/palefox-test-firefox/, then PATH.
+  // Throws with a setup hint if nothing's found.
+  const firefoxBin = opts.firefoxBin ?? locateFirefox();
   const testDir = opts.testDir ?? join(process.cwd(), "tests/integration");
   const marionettePort = opts.marionettePort ?? 2828;
 
