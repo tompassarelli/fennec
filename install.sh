@@ -365,6 +365,15 @@ fi
 # Configure browser preferences in user.js
 user_js="$profile/user.js"
 
+# Back up user.js before any modification. Matches the chrome.bak.<ts>/
+# pattern from earlier — the user can diff their previous prefs and cp
+# back if they don't like our defaults. See docs/install.md restore section.
+if [ -f "$user_js" ]; then
+    user_js_backup="${user_js}.bak.$(date +%Y-%m-%d-%H%M%S)"
+    cp "$user_js" "$user_js_backup"
+    echo "Backed up user.js → $(basename "$user_js_backup")"
+fi
+
 set_pref() {
     local key="$1" value="$2"
     local pref="user_pref(\"$key\", $value);"

@@ -344,6 +344,15 @@ try {
     # Configure browser preferences in user.js
     $userJs = Join-Path $profile.FullName "user.js"
 
+    # Back up user.js before any modification. Matches the chrome.bak.<ts>\
+    # pattern from earlier — the user can diff their previous prefs and copy
+    # back if they don't like our defaults. See docs/install.md restore section.
+    if (Test-Path $userJs) {
+        $userJsBackup = "${userJs}.bak.$(Get-Date -Format 'yyyy-MM-dd-HHmmss')"
+        Copy-Item -Path $userJs -Destination $userJsBackup
+        Write-Host "Backed up user.js -> $(Split-Path $userJsBackup -Leaf)"
+    }
+
     function Set-BrowserPref {
         param([string]$Key, [string]$Value)
         $line = "user_pref(`"$Key`", $Value);"

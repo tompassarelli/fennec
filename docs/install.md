@@ -35,6 +35,58 @@ Plus, in your Firefox application directory (requires sudo, root-owned):
 | `config.js` | palefox hash-pinned bootstrap (built from `program/config.template.js`) |
 | `defaults/pref/config-prefs.js` | autoconfig prefs that point Firefox at `config.js` |
 
+## Backups & restoring
+
+Every install pass creates timestamped backups of anything it modifies, so
+you can always inspect or restore your previous state:
+
+| Backup | Created when |
+|--------|--------------|
+| `<profile>/chrome.bak.<timestamp>/` | `chrome/` directory before wipe-and-replace of `utils/`, `JS/`, `CSS/` |
+| `<profile>/user.js.bak.<timestamp>` | `user.js` before any pref modification |
+| `<profile>/chrome/userChrome.css.legacy` | only when migrating from the old monolithic CSS layout |
+
+To restore your previous state:
+```bash
+cp -r <profile>/chrome.bak.<timestamp>/* <profile>/chrome/
+cp <profile>/user.js.bak.<timestamp> <profile>/user.js
+```
+
+To diff your current state against the previous one (e.g. to see which
+prefs we set):
+```bash
+diff <profile>/user.js.bak.<timestamp> <profile>/user.js
+```
+
+## Removing the legacy fx-autoconfig setup
+
+If you installed palefox before the safer-js-loader switch, your Firefox
+has a vanilla fx-autoconfig bootstrap that allows any process with write
+access to your profile to drop a `.uc.js` and have it execute with browser
+privileges. The hash-pinned loader closes this gap, but you may want to
+just remove fx-autoconfig entirely instead of upgrading.
+
+Run the uninstall script (does NOT remove your custom `chrome/JS/`,
+`chrome/CSS/`, `userChrome.css`, etc. — those are preserved as your files):
+
+```bash
+./uninstall-fx-autoconfig.sh             # Linux / macOS Firefox
+./uninstall-fx-autoconfig.sh --librewolf # LibreWolf
+```
+
+```powershell
+.\uninstall-fx-autoconfig.ps1            # Windows Firefox
+.\uninstall-fx-autoconfig.ps1 --librewolf
+```
+
+The script backs up `user.js` and `chrome/utils/` before removing them.
+Verify with:
+```bash
+test ! -f /usr/lib/firefox/config.js && echo "✓ bootstrap removed"
+test ! -d <profile>/chrome/utils && echo "✓ loader machinery removed"
+! grep -q userChromeJS.enabled <profile>/user.js && echo "✓ pref forcing removed"
+```
+
 ## Version targeting
 
 By default the install script grabs the latest tagged release. You can override:
